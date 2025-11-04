@@ -3,6 +3,7 @@
  * DRM driver for Sunfounder TFT35IPS panels
  *
  * Copyright 2020 Kamlesh Gurudasani <kamlesh.gurudasani@gmail.com>
+ * source from https://github.com/raspberrypi/linux/blob/rpi-6.12.y/drivers/gpu/drm/tiny/ili9486.c
  */
 
 #include <linux/backlight.h>
