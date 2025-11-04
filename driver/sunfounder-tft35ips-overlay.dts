@@ -59,7 +59,7 @@
                                 bgr;
 				buswidth = <8>;
 				regwidth = <16>;
-				reset-gpios = <&gpio 8 0>; // GPIO_ACTIVE_HIGH
+				reset-gpios = <&gpio 25 0>; // GPIO_ACTIVE_HIGH
 				dc-gpios = <&gpio 24 0>; // GPIO_ACTIVE_HIGH
 				led-gpios = <&gpio 22 0>; // GPIO_ACTIVE_HIGH
 				debug = <0>;
