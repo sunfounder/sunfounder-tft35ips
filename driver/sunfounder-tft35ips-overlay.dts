@@ -54,9 +54,10 @@
 				pinctrl-0 = <&sunfounder_tft35ips_pins>;
 
 				spi-max-frequency = <24000000>;
-				rotate = <180>;
+				rotation = <180>;
 				fps = <30>;
                                 bgr;
+                                color_invert;
 				buswidth = <8>;
 				regwidth = <16>;
 				reset-gpios = <&gpio 25 0>; // GPIO_ACTIVE_HIGH
@@ -94,11 +95,11 @@
 	};
 	__overrides__ {
 		speed =		<&sunfounder_tft35ips>,"spi-max-frequency:0";
-		rotate =	<&sunfounder_tft35ips>,"rotate:180",
-				<&sunfounder_tft35ips>,"rotation:180";
+		rotate =	<&sunfounder_tft35ips>,"rotation:180";
 		fps =		<&sunfounder_tft35ips>,"fps:0";
 		debug =		<&sunfounder_tft35ips>,"debug:0";
 		bgr = 		<&sunfounder_tft35ips>,"bgr=0";
+                color_invert=   <&sunfounder_tft35ips>,"color_invert=0";
 		xohms =		<&sunfounder_tft35ips_ts>,"ti,x-plate-ohms;0";
 		invx =		<&sunfounder_tft35ips_ts>,"touchscreen-inverted-x?";
 		invy =		<&sunfounder_tft35ips_ts>,"touchscreen-inverted-y?";
