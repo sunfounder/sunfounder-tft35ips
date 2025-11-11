@@ -35,6 +35,74 @@
 #define ILI9486_MADCTL_MX       BIT(6)
 #define ILI9486_MADCTL_MY       BIT(7)
 
+#define ST7796_NOP         0x00
+#define ST7796_SWRESET     0x01
+#define ST7796_RDDID       0x04
+#define ST7796_RDDST       0x09
+
+#define ST7796_SLPIN       0x10
+#define ST7796_SLPOUT      0x11
+#define ST7796_PTLON       0x12
+#define ST7796_NORON       0x13
+
+#define ST7796_RDMODE      0x0A
+#define ST7796_RDMADCTL    0x0B
+#define ST7796_RDPIXFMT    0x0C
+#define ST7796_RDIMGFMT    0x0A
+#define ST7796_RDSELFDIAG  0x0F
+
+#define ST7796_INVOFF      0x20
+#define ST7796_INVON       0x21
+
+#define ST7796_DISPOFF     0x28
+#define ST7796_DISPON      0x29
+
+#define ST7796_CASET       0x2A
+#define ST7796_PASET       0x2B
+#define ST7796_RAMWR       0x2C
+#define ST7796_RAMRD       0x2E
+
+#define ST7796_PTLAR       0x30
+#define ST7796_VSCRDEF     0x33
+#define ST7796_MADCTL      0x36
+#define ST7796_VSCRSADD    0x37
+#define ST7796_PIXFMT      0x3A
+
+#define ST7796_WRDISBV     0x51
+#define ST7796_RDDISBV     0x52
+#define ST7796_WRCTRLD     0x53
+
+#define ST7796_IFMODE      0xB0
+#define ST7796_FRMCTR1     0xB1
+#define ST7796_FRMCTR2     0xB2
+#define ST7796_FRMCTR3     0xB3
+#define ST7796_INVCTR      0xB4
+#define ST7796_BPCCTR      0xB5
+#define ST7796_DFUNCTR     0xB6
+#define ST7796_EMSET       0xB7
+
+#define ST7796_PWCTR1      0xC0
+#define ST7796_PWCTR2      0xC1
+#define ST7796_PWCTR3      0xC2
+
+#define ST7796_VMCTR1      0xC5
+#define ST7796_VMCOFF      0xC6
+
+#define ST7796_RDID4       0xD3
+
+#define ST7796_GMCTRP1     0xE0
+#define ST7796_GMCTRN1     0xE1
+#define ST7796_DOCACTL     0xE8
+
+#define ST7796_CSCONCTL    0xF0
+
+#define ST7796_MADCTL_MH	BIT(2)
+#define ST7796_MADCTL_BGR	BIT(3)
+#define ST7796_MADCTL_ML	BIT(4)
+#define ST7796_MADCTL_MV	BIT(5)
+#define ST7796_MADCTL_MX	BIT(6)
+#define ST7796_MADCTL_MY	BIT(7)
+
 static bool g_bgr_enabled;
 static bool g_color_invert_enabled;
 
@@ -108,36 +176,91 @@ static void waveshare_enable(struct drm_simple_display_pipe *pipe,
 	if (!drm_dev_enter(pipe->crtc.dev, &idx))
 		return;
 
-	pr_info("[Sunfounder TFT35IPS] Enter waveshare_enable: g_bgr_enabled = %d\n", g_bgr_enabled);
-
 	ret = mipi_dbi_poweron_conditional_reset(dbidev);
 	if (ret < 0)
 		goto out_exit;
 	if (ret == 1)
 		goto out_enable;
 
-	mipi_dbi_command(dbi, ILI9486_ITFCTR1);
-	mipi_dbi_command(dbi, MIPI_DCS_EXIT_SLEEP_MODE);
-	msleep(250);
+	mipi_dbi_command(dbi, MIPI_DCS_SET_DISPLAY_OFF);
+	msleep(120);
 
-	mipi_dbi_command(dbi, MIPI_DCS_SET_PIXEL_FORMAT, 0x55);
+	/* Software reset */
+	// mipi_dbi_command(dbi, ST7796_SWRESET);
+	// msleep(120);
 
-	mipi_dbi_command(dbi, ILI9486_PWCTRL1, 0x44);
+	/* Sleep exit */
+	mipi_dbi_command(dbi, ST7796_SLPOUT);
+	msleep(255);
 
-	mipi_dbi_command(dbi, ILI9486_VMCTRL1, 0x00, 0x00, 0x00, 0x00);
+	/* Memory Data Access Control MX, MY, RGB mode */
+	mipi_dbi_command(dbi, ST7796_MADCTL, 0x28);    //X-Mirror, Top-Left to right-Buttom, RGB  
 
-	mipi_dbi_command(dbi, ILI9486_PGAMCTRL,
-			 0x0F, 0x1F, 0x1C, 0x0C, 0x0F, 0x08, 0x48, 0x98,
-			 0x37, 0x0A, 0x13, 0x04, 0x11, 0x0D, 0x0);
-	mipi_dbi_command(dbi, ILI9486_NGAMCTRL,
-			 0x0F, 0x32, 0x2E, 0x0B, 0x0D, 0x05, 0x47, 0x75,
-			 0x37, 0x06, 0x10, 0x03, 0x24, 0x20, 0x00);
-	mipi_dbi_command(dbi, ILI9486_DGAMCTRL,
-			 0x0F, 0x32, 0x2E, 0x0B, 0x0D, 0x05, 0x47, 0x75,
-			 0x37, 0x06, 0x10, 0x03, 0x24, 0x20, 0x00);
+	/* Interface Pixel Format */
+	mipi_dbi_command(dbi, ST7796_PIXFMT, 0x55);
 
-	mipi_dbi_command(dbi, MIPI_DCS_SET_DISPLAY_ON);
+	/* Command Set control */
+	mipi_dbi_command(dbi, ST7796_CSCONCTL, 0xC3);    //Enable extension command 2 partI
+
+	/* Command Set control */
+	mipi_dbi_command(dbi, ST7796_CSCONCTL, 0x96);    //Enable extension command 2 partII
+
+	mipi_dbi_command(dbi, ST7796_INVCTR, 0x01);
+	mipi_dbi_command(dbi, ST7796_EMSET, 0xC6);
+
+	mipi_dbi_command(dbi, ST7796_PWCTR1, 0x80, 0x45);
+
+	/* Power control2 */
+	mipi_dbi_command(dbi, ST7796_PWCTR2, 0x13);
+
+	/* Power control 3 */
+	mipi_dbi_command(dbi, ST7796_PWCTR3, 0xA7);
+
+	/* VCOM Control */
+	mipi_dbi_command(dbi, ST7796_VMCTR1, 0x0a);
+	msleep(120);
+
+	/* Display Output Ctrl Adjust */
+	mipi_dbi_command(dbi, ST7796_DOCACTL, 0x40, 0x8a, 0x00, 0x00, 0x29, 0x19, 0xa5, 0x33); 
+
+	/* ST7796 Gamma Sequence */
+	/* Gamma"+" */
+	mipi_dbi_command(dbi, ST7796_GMCTRP1, 0xd0, 0x08, 0x0f, 0x06, 0x06, 0x33, 0x30, 0x33, 0x47, 0x17, 0x13, 0x13, 0x2b, 0x31); 
+	/* Gamma"-" */
+	mipi_dbi_command(dbi, ST7796_GMCTRN1, 0xd0, 0x0a, 0x11, 0x0b, 0x09, 0x07, 0x2f, 0x33, 0x47, 0x38, 0x15, 0x16, 0x2c, 0x32);
+	msleep(120);
+
+	/* Command Set control */
+	mipi_dbi_command(dbi, ST7796_CSCONCTL, 0x3C);    //Disable extension command 2 partI
+	mipi_dbi_command(dbi, ST7796_CSCONCTL, 0x69);    //Disable extension command 2 partII
+	msleep(255);
+
+	mipi_dbi_command(dbi, ST7796_INVON);
+	mipi_dbi_command(dbi, ST7796_DISPON);
 	msleep(100);
+
+	// mipi_dbi_command(dbi, ILI9486_ITFCTR1);
+	// mipi_dbi_command(dbi, MIPI_DCS_EXIT_SLEEP_MODE);
+	// msleep(250);
+
+	// mipi_dbi_command(dbi, MIPI_DCS_SET_PIXEL_FORMAT, 0x55);
+
+	// mipi_dbi_command(dbi, ILI9486_PWCTRL1, 0x44);
+
+	// mipi_dbi_command(dbi, ILI9486_VMCTRL1, 0x00, 0x00, 0x00, 0x00);
+
+	// mipi_dbi_command(dbi, ILI9486_PGAMCTRL,
+	// 		 0x0F, 0x1F, 0x1C, 0x0C, 0x0F, 0x08, 0x48, 0x98,
+	// 		 0x37, 0x0A, 0x13, 0x04, 0x11, 0x0D, 0x0);
+	// mipi_dbi_command(dbi, ILI9486_NGAMCTRL,
+	// 		 0x0F, 0x32, 0x2E, 0x0B, 0x0D, 0x05, 0x47, 0x75,
+	// 		 0x37, 0x06, 0x10, 0x03, 0x24, 0x20, 0x00);
+	// mipi_dbi_command(dbi, ILI9486_DGAMCTRL,
+	// 		 0x0F, 0x32, 0x2E, 0x0B, 0x0D, 0x05, 0x47, 0x75,
+	// 		 0x37, 0x06, 0x10, 0x03, 0x24, 0x20, 0x00);
+
+	// mipi_dbi_command(dbi, MIPI_DCS_SET_DISPLAY_ON);
+	// msleep(100);
 	if (g_color_invert_enabled) {
 		mipi_dbi_command(dbi, MIPI_DCS_ENTER_INVERT_MODE, 0x00);
 	}
@@ -180,7 +303,7 @@ static const struct drm_display_mode waveshare_mode = {
 DEFINE_DRM_GEM_DMA_FOPS(sunfounder_tft35ips_fops);
 
 static const struct drm_driver sunfounder_tft35ips_driver = {
-	.driver_features	= DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
+	.driver_features	= DRIVER_GEM | DRIVER_MODESET | DRIVER_PRIME | DRIVER_ATOMIC,
 	.fops			= &sunfounder_tft35ips_fops,
 	DRM_GEM_DMA_DRIVER_OPS_VMAP,
 	.debugfs_init		= mipi_dbi_debugfs_init,
