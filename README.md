@@ -30,6 +30,39 @@ cd sunfounder-tft35ips
 sudo bash install.sh
 ```
 
+## Check the installation
+
+```bash
+sudo sf-tft doctor
+```
+
+`doctor` checks the device-tree overlay, the kernel module, the DRM output,
+the touch device, the calibration matrix, the power supply (undervoltage) and
+recent kernel log lines. Every line is `[ OK ]`, `[WARN]` or `[FAIL]` with a
+hint for what to do next.
+
+```bash
+sudo sf-tft doctor --fix      # repair the safe, idempotent problems
+sudo sf-tft doctor --report   # write /tmp/sf-tft-report-<time>.txt for support
+sudo sf-tft status            # one-screen summary
+sudo sf-tft calibrate         # run the 4-point calibration
+sudo sf-tft speed 48          # store an SPI clock override (MHz) in config.txt
+sudo sf-tft rotation 180      # temporary rotation via wlr-randr
+```
+
+`doctor --fix` re-adds a missing `dtoverlay`, `modprobe`s the module, reloads
+the udev rules (which re-applies the touch calibration) and then re-runs the
+checks. It never reboots, flashes firmware or deletes anything.
+
+The doctor convention (required checks, output format, `--fix` boundaries,
+`--report` bundle) is described in the `doctor` skill.
+
+## DKMS
+
+`install.sh` registers the module with DKMS as `sunfounder-tft35ips/1.0.0`, so
+it is rebuilt automatically after a kernel update. Check with `dkms status`;
+set `TFT35IPS_NO_DKMS=1` to force a plain `make install` instead.
+
 ## Pin definition
 
 | Pin (BCM) | Function |

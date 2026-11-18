@@ -5,19 +5,23 @@
 #   curl -sSL https://raw.githubusercontent.com/sunfounder/sunfounder-tft35ips/main/install.sh | sudo bash
 #
 # Installs:
-#   - the DRM driver (sunfounder-tft35ips.ko) and its device-tree overlay
-#   - the touch calibration tool (touch-calibrate) and its desktop entry
+#   - the DRM driver (sunfounder-tft35ips.ko), via DKMS when available
+#   - the device-tree overlay
+#   - sf-tft (doctor / calibrate / status) and the touch calibration tool
 #   - dtoverlay=sunfounder-tft35ips in config.txt
 #
 # Environment overrides (mainly for development):
 #   TFT35IPS_LOCAL=/path/to/checkout   use a local checkout instead of cloning
 #   TFT35IPS_REPO=... TFT35IPS_BRANCH=... TFT35IPS_DIR=...
+#   TFT35IPS_NO_DKMS=1                 force a plain make install
 #   TFT35IPS_NO_REBOOT_PROMPT=1        do not ask to reboot at the end
 
 set -e
 
 DRIVER_REPO="${TFT35IPS_REPO:-https://github.com/sunfounder/sunfounder-tft35ips.git}"
 DRIVER_BRANCH="${TFT35IPS_BRANCH:-main}"
+DKMS_VERSION="1.0.0"
+DKMS_SRC="/usr/src/sunfounder-tft35ips-$DKMS_VERSION"
 
 USER_NAME="${SUDO_USER:-$USER}"
 USER_HOME=$(getent passwd "$USER_NAME" | cut -d: -f6)
@@ -40,7 +44,7 @@ done
 
 log "1/6 Install dependencies"
 apt-get update -qq || die "apt-get update failed"
-apt-get install -y git build-essential device-tree-compiler \
+apt-get install -y git build-essential device-tree-compiler dkms \
     python3-evdev python3-gi python3-gi-cairo || die "dependency install failed"
 if [ ! -d "/usr/src/linux-headers-$(uname -r)" ]; then
     apt-get install -y "linux-headers-$(uname -r)" \
@@ -71,10 +75,27 @@ make -C "$SRC/driver" || die "driver build failed"
 ok "driver built"
 
 log "4/6 Install driver"
-make -C "$SRC/driver" install || die "driver install failed"
-ok "driver installed"
+if [ -z "${TFT35IPS_NO_DKMS:-}" ] && command -v dkms >/dev/null 2>&1; then
+    rm -rf "$DKMS_SRC"
+    install -d "$DKMS_SRC"
+    cp -a "$SRC/driver/." "$DKMS_SRC/"
+    cp "$SRC/dkms.conf" "$DKMS_SRC/dkms.conf"
+    dkms remove -m sunfounder-tft35ips -v "$DKMS_VERSION" --all >/dev/null 2>&1 || true
+    dkms add -m sunfounder-tft35ips -v "$DKMS_VERSION"
+    dkms build -m sunfounder-tft35ips -v "$DKMS_VERSION"
+    dkms install --force -m sunfounder-tft35ips -v "$DKMS_VERSION"
+    ok "driver installed with DKMS (auto-rebuild on kernel updates)"
+else
+    make -C "$SRC/driver" modules_install
+    depmod -a
+    ok "driver installed (make install)"
+fi
+install -m 644 "$SRC/driver/sunfounder-tft35ips.dtbo" /boot/firmware/overlays/ \
+    || install -m 644 "$SRC/driver/sunfounder-tft35ips.dtbo" /boot/overlays/
+ok "overlay installed"
 
-log "5/6 Install touch calibration tool"
+log "5/6 Install tools"
+install -m 755 "$SRC/tools/sf-tft" /usr/local/bin/sf-tft
 install -m 755 "$SRC/tools/touch-calibrate/touch-calibrate" /usr/local/bin/touch-calibrate
 install -m 755 "$SRC/tools/touch-calibrate/apply-touch-calibration" /usr/local/sbin/apply-touch-calibration
 printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/apply-touch-calibration\n' "$USER_NAME" \
@@ -83,7 +104,7 @@ chmod 440 /etc/sudoers.d/touch-calibrate
 visudo -cf /etc/sudoers.d/touch-calibrate >/dev/null
 install -m 644 "$SRC/tools/touch-calibrate/touch-calibrate.desktop" \
     /usr/share/applications/touch-calibrate.desktop
-ok "touch-calibrate installed"
+ok "sf-tft and touch-calibrate installed"
 
 log "6/6 Enable overlay"
 if grep -q '^dtoverlay=sunfounder-tft35ips' "$CONFIG_TXT"; then
@@ -96,7 +117,8 @@ fi
 
 echo
 ok "Install finished. Reboot to apply the driver."
-echo "   After reboot, run 'Touch Calibration' from the desktop menu if the touch position is off."
+echo "   Check with:  sf-tft doctor"
+echo "   Calibrate:   sf-tft calibrate"
 
 if [ -z "${TFT35IPS_NO_REBOOT_PROMPT:-}" ] && [ -r /dev/tty ]; then
     read -r -p "Reboot now? (y/n) " -n 1 REPLY < /dev/tty || true

@@ -424,3 +424,4 @@ module_spi_driver(sunfounder_tft35ips_spi_driver);
 MODULE_DESCRIPTION("Sunfounder TFT35IPS DRM driver");
 MODULE_AUTHOR("Kamlesh Gurudasani <kamlesh.gurudasani@gmail.com>");
 MODULE_LICENSE("GPL");
+MODULE_VERSION("1.0.0");
