@@ -38,22 +38,12 @@ jobs:
           import json, re
 
           found = set()
-          for path in ("/tmp/idx/arm64", "/tmp/idx/armhf"):
-              with open(path) as f:
-                  for line in f:
-                      m = re.match(
-                          r"Package: linux-headers-(\d+\.\d+\.\d+\+rpt-rpi-(?:v6|v7|v7l|v8|2712))$",
-                          line.strip())
-                      if m:
-                          found.add(m.group(1))
-
-          arch_for = {
-              "v8": ("arm64", "aarch64-linux-gnu-", "arm64"),
-              "2712": ("arm64", "aarch64-linux-gnu-", "arm64"),
-              "v7l": ("arm", "arm-linux-gnueabihf-", "armhf"),
-              "v7": ("arm", "arm-linux-gnueabihf-", "armhf"),
-              "v6": ("arm", "arm-linux-gnueabihf-", "armhf"),
-          }
+          with open("/tmp/idx/arm64") as f:
+              for line in f:
+                  m = re.match(r"Package: linux-headers-(\d+\.\d+\.\d+\+rpt-rpi-(?:v8|2712))$",
+                               line.strip())
+                  if m:
+                      found.add(m.group(1))
 
           def key(v):
               m = re.match(r"(\d+)\.(\d+)\.(\d+)", v)
@@ -65,16 +55,11 @@ jobs:
 
           include = []
           for variant, versions in by_variant.items():
-              if variant not in arch_for:
-                  continue
-              arch, cross, debarch = arch_for[variant]
               for ver in sorted(versions, key=key, reverse=True)[:3]:
                   include.append({
                       "headers": "linux-headers-" + ver,
                       "kernel": ver,
-                      "arch": arch,
-                      "cross": cross,
-                      "debarch": debarch,
+                      "variant": variant,
                   })
 
           print(json.dumps(include))
@@ -84,8 +69,7 @@ jobs:
 
   build:
     needs: discover
-    runs-on: ubuntu-latest
-    container: debian:bookworm
+    runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: false
       matrix:
@@ -95,49 +79,42 @@ jobs:
 
       - name: Install build tools
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates curl gnupg xz-utils device-tree-compiler \
-            crossbuild-essential-arm64 crossbuild-essential-armhf
-
-      - name: Add Raspberry Pi archive
-        run: |
-          curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key \
-            | gpg --dearmor -o /etc/apt/trusted.gpg.d/raspberrypi.gpg
-          echo "deb http://archive.raspberrypi.com/debian bookworm main" \
-            > /etc/apt/sources.list.d/raspberrypi.list
-          dpkg --add-architecture ${{ matrix.debarch }}
-          apt-get update
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates curl gnupg xz-utils device-tree-compiler build-essential
 
       - name: Fetch kernel headers
         shell: bash
         run: |
-          export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           BASE="$(echo "${{ matrix.kernel }}" | sed 's/+rpt.*//')"
           COMMON="linux-headers-${BASE}+rpt-common-rpi"
+          KBUILD="linux-kbuild-${BASE}+rpt"
           mkdir -p /tmp/debs /tmp/hdr /usr/src
           cd /tmp/debs
-          apt-get download "${{ matrix.headers }}:${{ matrix.debarch }}"
-          apt-get download "${COMMON}" || true
-          apt-get download "linux-kbuild-${BASE}+rpt:${{ matrix.debarch }}" 2>/dev/null \
-            || apt-get download "linux-kbuild-${BASE}+rpt" || true
+          curl -fsSL "http://archive.raspberrypi.com/debian/raspberrypi.gpg.key" \
+            | gpg --dearmor -o /etc/apt/trusted.gpg.d/raspberrypi.gpg
+          echo "deb http://archive.raspberrypi.com/debian bookworm main" \
+            | sudo tee /etc/apt/sources.list.d/raspberrypi.list
+          sudo apt-get update
+          sudo apt-get download "${{ matrix.headers }}:arm64"
+          sudo apt-get download "${COMMON}" || true
+          sudo apt-get download "${KBUILD}:arm64" || sudo apt-get download "${KBUILD}" || true
+          sudo chown -R "$USER" /tmp/debs 2>/dev/null || true
           for d in *.deb; do dpkg -x "$d" /tmp/hdr; done
           test -d "/tmp/hdr/usr/src/linux-headers-${{ matrix.kernel }}"
           test -d "/tmp/hdr/usr/src/${COMMON}"
-          test -d "/tmp/hdr/usr/lib/linux-kbuild-${BASE}+rpt/scripts"
-          # the variant Makefile includes the common tree by absolute path
-          ln -sfn "/tmp/hdr/usr/src/linux-headers-${{ matrix.kernel }}" "/usr/src/linux-headers-${{ matrix.kernel }}"
-          ln -sfn "/tmp/hdr/usr/src/${COMMON}" "/usr/src/${COMMON}"
-          echo "headers ready: /usr/src/linux-headers-${{ matrix.kernel }}"
+          test -d "/tmp/hdr/usr/lib/${KBUILD}/scripts"
+          sudo mkdir -p /usr/src
+          sudo ln -sfn "/tmp/hdr/usr/src/linux-headers-${{ matrix.kernel }}" "/usr/src/linux-headers-${{ matrix.kernel }}"
+          sudo ln -sfn "/tmp/hdr/usr/src/${COMMON}" "/usr/src/${COMMON}"
+          echo "headers ready"
 
       - name: Build module
         shell: bash
         run: |
-          export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           make -C /usr/src/linux-headers-${{ matrix.kernel }} \
             M="$PWD/driver" \
-            ARCH=${{ matrix.arch }} \
-            CROSS_COMPILE=${{ matrix.cross }} \
+            ARCH=arm64 \
             modules
           cd driver
           dtc -@ -I dts -O dtb -o sunfounder-tft35ips.dtbo sunfounder-tft35ips-overlay.dts
@@ -147,8 +124,8 @@ jobs:
       - name: Stage artifacts
         run: |
           mkdir -p out
-          cp driver/sunfounder-tft35ips.ko.xz "out/sunfounder-tft35ips-${{ matrix.kernel }}-${{ matrix.arch }}.ko.xz"
-          cp driver/sunfounder-tft35ips.dtbo "out/sunfounder-tft35ips-${{ matrix.kernel }}-${{ matrix.arch }}.dtbo"
+          cp driver/sunfounder-tft35ips.ko.xz "out/sunfounder-tft35ips-${{ matrix.kernel }}-arm64.ko.xz"
+          cp driver/sunfounder-tft35ips.dtbo "out/sunfounder-tft35ips-${{ matrix.kernel }}-arm64.dtbo"
 
       - name: Upload release assets
         if: startsWith(github.ref, 'refs/tags/')
