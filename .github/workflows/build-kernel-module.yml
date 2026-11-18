@@ -1,0 +1,112 @@
+name: build-kernel-module
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: debian:bookworm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kernel: "6.12.109+rpt-rpi-v8"
+            headers: "linux-headers-6.12.109+rpt-rpi-v8"
+            arch: arm64
+            cross: aarch64-linux-gnu-
+            debarch: arm64
+          - kernel: "6.12.109+rpt-rpi-v7l"
+            headers: "linux-headers-6.12.109+rpt-rpi-v7l"
+            arch: arm
+            cross: arm-linux-gnueabihf-
+            debarch: armhf
+          - kernel: "6.12.109+rpt-rpi-2712"
+            headers: "linux-headers-6.12.109+rpt-rpi-2712"
+            arch: arm64
+            cross: aarch64-linux-gnu-
+            debarch: arm64
+          - kernel: "6.6.31+rpt-rpi-v8"
+            headers: "linux-headers-6.6.31+rpt-rpi-v8"
+            arch: arm64
+            cross: aarch64-linux-gnu-
+            debarch: arm64
+          - kernel: "6.6.31+rpt-rpi-v7l"
+            headers: "linux-headers-6.6.31+rpt-rpi-v7l"
+            arch: arm
+            cross: arm-linux-gnueabihf-
+            debarch: armhf
+          - kernel: "6.6.31+rpt-rpi-2712"
+            headers: "linux-headers-6.6.31+rpt-rpi-2712"
+            arch: arm64
+            cross: aarch64-linux-gnu-
+            debarch: arm64
+          - kernel: "6.1.21+rpt-rpi-v8"
+            headers: "linux-headers-6.1.21+rpt-rpi-v8"
+            arch: arm64
+            cross: aarch64-linux-gnu-
+            debarch: arm64
+          - kernel: "6.1.21+rpt-rpi-v7l"
+            headers: "linux-headers-6.1.21+rpt-rpi-v7l"
+            arch: arm
+            cross: arm-linux-gnueabihf-
+            debarch: armhf
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl gnupg xz-utils device-tree-compiler \
+            crossbuild-essential-arm64 crossbuild-essential-armhf
+
+      - name: Add Raspberry Pi archive
+        run: |
+          curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key \
+            | gpg --dearmor -o /etc/apt/trusted.gpg.d/raspberrypi.gpg
+          echo "deb http://archive.raspberrypi.com/debian bookworm main" \
+            > /etc/apt/sources.list.d/raspberrypi.list
+          dpkg --add-architecture ${{ matrix.debarch }}
+          apt-get update
+
+      - name: Fetch kernel headers
+        run: |
+          mkdir -p /tmp/debs
+          cd /tmp/debs
+          apt-get download "${{ matrix.headers }}:${{ matrix.debarch }}"
+          apt-get download "linux-headers-$(echo '${{ matrix.kernel }}' | sed 's/+rpt.*//')+rpt-common-rpi" || true
+          for d in *.deb; do dpkg -x "$d" /; done
+          ls -d /usr/src/linux-headers-${{ matrix.kernel }}
+
+      - name: Build module
+        run: |
+          make -C /usr/src/linux-headers-${{ matrix.kernel }} \
+            M="$PWD/driver" \
+            ARCH=${{ matrix.arch }} \
+            CROSS_COMPILE=${{ matrix.cross }} \
+            modules
+          cd driver
+          dtc -@ -I dts -O dtb -o sunfounder-tft35ips.dtbo sunfounder-tft35ips-overlay.dts
+          xz -9 sunfounder-tft35ips.ko
+          ls -l sunfounder-tft35ips.ko.xz sunfounder-tft35ips.dtbo
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p out
+          cp driver/sunfounder-tft35ips.ko.xz "out/sunfounder-tft35ips-${{ matrix.kernel }}-${{ matrix.arch }}.ko.xz"
+          cp driver/sunfounder-tft35ips.dtbo "out/sunfounder-tft35ips-${{ matrix.kernel }}-${{ matrix.arch }}.dtbo"
+
+      - name: Upload release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          fail_on_unmatched_files: true
