@@ -68,7 +68,7 @@ jobs:
               if variant not in arch_for:
                   continue
               arch, cross, debarch = arch_for[variant]
-              for ver in sorted(versions, key=key, reverse=True):
+              for ver in sorted(versions, key=key, reverse=True)[:3]:
                   include.append({
                       "headers": "linux-headers-" + ver,
                       "kernel": ver,
