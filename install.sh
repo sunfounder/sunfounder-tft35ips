@@ -105,8 +105,11 @@ else
     if ! curl -fsSL --retry 2 -o "/tmp/$MOD_ASSET" "$RELEASE_URL/$MOD_ASSET"; then
         die "no prebuilt module for kernel $KVER ($ARCH).
      Expected asset: $MOD_ASSET
-     Supported kernels are built by CI; run 'uname -r' and open an issue if yours is missing.
-     To compile locally instead (needs kernel headers): re-run with TFT35IPS_BUILD_FROM_SOURCE=1"
+     The CI builds the two newest kernels of each series (6.6 / 6.12 / 6.18).
+     - build locally instead (needs kernel headers for $KVER):
+         curl -sSL ... | sudo TFT35IPS_BUILD_FROM_SOURCE=1 bash
+     - or ask us to cover this kernel (paste the output of 'uname -r'):
+         https://github.com/sunfounder/sunfounder-tft35ips/issues"
     fi
     xz -df "/tmp/$MOD_ASSET"
     mkdir -p "/lib/modules/$KVER/updates"
