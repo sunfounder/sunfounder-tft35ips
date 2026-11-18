@@ -10,54 +10,83 @@ permissions:
   contents: write
 
 jobs:
+  discover:
+    runs-on: ubuntu-latest
+    container: debian:bookworm
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+    steps:
+      - name: Find the current kernel header packages
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl gnupg
+          curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key \
+            | gpg --dearmor -o /etc/apt/trusted.gpg.d/raspberrypi.gpg
+          echo "deb http://archive.raspberrypi.com/debian bookworm main" \
+            > /etc/apt/sources.list.d/raspberrypi.list
+          apt-get update
+
+      - name: Generate matrix
+        id: gen
+        run: |
+          python3 - <<'PY'
+          import json, re, subprocess
+
+          out = subprocess.run(
+              ["apt-cache", "search", "--names-only", r"^linux-headers-.*-rpt-rpi-.*$"],
+              capture_output=True, text=True).stdout
+
+          pkgs = {}
+          for line in out.splitlines():
+              name = line.split()[0]
+              m = re.match(r"linux-headers-(\d+\.\d+\.\d+\+rpt-rpi-(v6|v7|v7l|v8|2712))$", name)
+              if m:
+                  pkgs[name] = m.group(1)
+
+          def sort_key(v):
+              m = re.match(r"(\d+)\.(\d+)\.(\d+)", v)
+              return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
+
+          # newest two versions per variant
+          by_variant = {}
+          for name, ver in pkgs.items():
+              variant = ver.rsplit("-", 1)[1]
+              by_variant.setdefault(variant, set()).add(name)
+
+          arch_for = {"v8": ("arm64", "aarch64-linux-gnu-", "arm64"),
+                      "v7l": ("arm", "arm-linux-gnueabihf-", "armhf"),
+                      "v7": ("arm", "arm-linux-gnueabihf-", "armhf"),
+                      "v6": ("arm", "arm-linux-gnueabihf-", "armhf"),
+                      "2712": ("arm64", "aarch64-linux-gnu-", "arm64")}
+
+          include = []
+          for variant, names in by_variant.items():
+              if variant not in arch_for:
+                  continue
+              arch, cross, debarch = arch_for[variant]
+              for name in sorted(names, key=lambda n: sort_key(pkgs[n]), reverse=True)[:2]:
+                  include.append({
+                      "headers": name,
+                      "kernel": pkgs[name],
+                      "arch": arch,
+                      "cross": cross,
+                      "debarch": debarch,
+                  })
+
+          print(json.dumps(include))
+          with open("/tmp/matrix.json", "w") as f:
+              json.dump(include, f)
+          PY
+          echo "matrix=$(cat /tmp/matrix.json)" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: discover
     runs-on: ubuntu-latest
     container: debian:bookworm
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - kernel: "6.12.109+rpt-rpi-v8"
-            headers: "linux-headers-6.12.109+rpt-rpi-v8"
-            arch: arm64
-            cross: aarch64-linux-gnu-
-            debarch: arm64
-          - kernel: "6.12.109+rpt-rpi-v7l"
-            headers: "linux-headers-6.12.109+rpt-rpi-v7l"
-            arch: arm
-            cross: arm-linux-gnueabihf-
-            debarch: armhf
-          - kernel: "6.12.109+rpt-rpi-2712"
-            headers: "linux-headers-6.12.109+rpt-rpi-2712"
-            arch: arm64
-            cross: aarch64-linux-gnu-
-            debarch: arm64
-          - kernel: "6.6.31+rpt-rpi-v8"
-            headers: "linux-headers-6.6.31+rpt-rpi-v8"
-            arch: arm64
-            cross: aarch64-linux-gnu-
-            debarch: arm64
-          - kernel: "6.6.31+rpt-rpi-v7l"
-            headers: "linux-headers-6.6.31+rpt-rpi-v7l"
-            arch: arm
-            cross: arm-linux-gnueabihf-
-            debarch: armhf
-          - kernel: "6.6.31+rpt-rpi-2712"
-            headers: "linux-headers-6.6.31+rpt-rpi-2712"
-            arch: arm64
-            cross: aarch64-linux-gnu-
-            debarch: arm64
-          - kernel: "6.1.21+rpt-rpi-v8"
-            headers: "linux-headers-6.1.21+rpt-rpi-v8"
-            arch: arm64
-            cross: aarch64-linux-gnu-
-            debarch: arm64
-          - kernel: "6.1.21+rpt-rpi-v7l"
-            headers: "linux-headers-6.1.21+rpt-rpi-v7l"
-            arch: arm
-            cross: arm-linux-gnueabihf-
-            debarch: armhf
-
+        include: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -78,16 +107,21 @@ jobs:
           apt-get update
 
       - name: Fetch kernel headers
+        shell: bash
         run: |
+          export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           mkdir -p /tmp/debs
           cd /tmp/debs
           apt-get download "${{ matrix.headers }}:${{ matrix.debarch }}"
-          apt-get download "linux-headers-$(echo '${{ matrix.kernel }}' | sed 's/+rpt.*//')+rpt-common-rpi" || true
+          apt-get download "linux-headers-${{ matrix.kernel }}+rpt-common-rpi:${{ matrix.debarch }}" || true
           for d in *.deb; do dpkg -x "$d" /; done
-          ls -d /usr/src/linux-headers-${{ matrix.kernel }}
+          test -d "/usr/src/linux-headers-${{ matrix.kernel }}"
+          echo "headers ready: /usr/src/linux-headers-${{ matrix.kernel }}"
 
       - name: Build module
+        shell: bash
         run: |
+          export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           make -C /usr/src/linux-headers-${{ matrix.kernel }} \
             M="$PWD/driver" \
             ARCH=${{ matrix.arch }} \
