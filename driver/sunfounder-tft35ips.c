@@ -17,8 +17,21 @@
 
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_drv.h>
-#include <drm/drm_fbdev_dma.h>
-#include <drm/clients/drm_client_setup.h>
+#if defined(__has_include)
+# if __has_include(<drm/clients/drm_client_setup.h>)
+#  include <drm/clients/drm_client_setup.h>
+#  define SF_TFT_FBDEV_CLIENT
+# elif __has_include(<drm/drm_fbdev_dma.h>)
+#  include <drm/drm_fbdev_dma.h>
+#  define SF_TFT_FBDEV_DMA
+# else
+#  include <drm/drm_fbdev_generic.h>
+#  define SF_TFT_FBDEV_GENERIC
+# endif
+#else
+# include <drm/drm_fbdev_dma.h>
+# define SF_TFT_FBDEV_DMA
+#endif
 #include <drm/drm_gem_atomic_helper.h>
 #include <drm/drm_gem_dma_helper.h>
 #include <drm/drm_managed.h>
@@ -313,11 +326,28 @@ static const struct drm_display_mode waveshare_mode = {
 
 DEFINE_DRM_GEM_DMA_FOPS(sunfounder_tft35ips_fops);
 
+#ifdef DRIVER_PRIME
+#define SF_TFT_DRIVER_PRIME	DRIVER_PRIME |
+#else
+#define SF_TFT_DRIVER_PRIME
+#endif
+
+#ifdef SF_TFT_FBDEV_GENERIC
+#define SF_TFT_FBDEV_FEATURE	| DRIVER_FBDEV_EMULATION
+#else
+#define SF_TFT_FBDEV_FEATURE
+#endif
+
 static const struct drm_driver sunfounder_tft35ips_driver = {
-	.driver_features	= DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
+	.driver_features	= SF_TFT_DRIVER_PRIME DRIVER_GEM | DRIVER_MODESET |
+				  DRIVER_ATOMIC SF_TFT_FBDEV_FEATURE,
 	.fops			= &sunfounder_tft35ips_fops,
 	DRM_GEM_DMA_DRIVER_OPS_VMAP,
+#if defined(SF_TFT_FBDEV_CLIENT) || defined(SF_TFT_FBDEV_DMA)
 	DRM_FBDEV_DMA_DRIVER_OPS,
+#else
+	.dumb_create		= drm_gem_dma_dumb_create,
+#endif
 	.debugfs_init		= mipi_dbi_debugfs_init,
 	.name			= "sunfounder-tft35ips",
 	.desc			= "Sunfounder TFT35IPS",
@@ -391,7 +421,13 @@ static int sunfounder_tft35ips_probe(struct spi_device *spi)
 
 	spi_set_drvdata(spi, drm);
 
+#if defined(SF_TFT_FBDEV_CLIENT)
 	drm_client_setup_with_fourcc(drm, DRM_FORMAT_RGB565);
+#elif defined(SF_TFT_FBDEV_DMA)
+	drm_fbdev_dma_setup(drm, 0);
+#else
+	drm_fbdev_generic_setup(drm, 16);
+#endif
 
 	return 0;
 }
