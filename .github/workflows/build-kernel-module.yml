@@ -63,14 +63,23 @@ jobs:
           for ver in found:
               by_variant.setdefault(ver.rsplit("-", 1)[1], set()).add(ver)
 
+          def series(v):
+              m = re.match(r"(\d+\.\d+)\.", v)
+              return m.group(1) if m else v
+
           include = []
           for variant, versions in by_variant.items():
-              for ver in sorted(versions, key=key, reverse=True)[:2]:
-                  include.append({
-                      "headers": "linux-headers-" + ver,
-                      "kernel": ver,
-                      "variant": variant,
-                  })
+              # newest two per kernel series (6.12.x, 6.18.x, ...)
+              per_series = {}
+              for ver in versions:
+                  per_series.setdefault(series(ver), []).append(ver)
+              for _, vers in per_series.items():
+                  for ver in sorted(vers, key=key, reverse=True)[:2]:
+                      include.append({
+                          "headers": "linux-headers-" + ver,
+                          "kernel": ver,
+                          "variant": variant,
+                      })
 
           print(json.dumps(include))
           PY
