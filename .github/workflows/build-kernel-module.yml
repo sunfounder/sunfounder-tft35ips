@@ -113,19 +113,19 @@ jobs:
         shell: bash
         run: |
           export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-          mkdir -p /tmp/debs
+          mkdir -p /tmp/debs /tmp/hdr
           cd /tmp/debs
           apt-get download "${{ matrix.headers }}:${{ matrix.debarch }}"
           apt-get download "linux-headers-${{ matrix.kernel }}+rpt-common-rpi:${{ matrix.debarch }}" || true
-          for d in *.deb; do dpkg -x "$d" /; done
-          test -d "/usr/src/linux-headers-${{ matrix.kernel }}"
-          echo "headers ready: /usr/src/linux-headers-${{ matrix.kernel }}"
+          for d in *.deb; do dpkg -x "$d" /tmp/hdr; done
+          test -d "/tmp/hdr/usr/src/linux-headers-${{ matrix.kernel }}"
+          echo "headers ready: /tmp/hdr/usr/src/linux-headers-${{ matrix.kernel }}"
 
       - name: Build module
         shell: bash
         run: |
           export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-          make -C /usr/src/linux-headers-${{ matrix.kernel }} \
+          make -C /tmp/hdr/usr/src/linux-headers-${{ matrix.kernel }} \
             M="$PWD/driver" \
             ARCH=${{ matrix.arch }} \
             CROSS_COMPILE=${{ matrix.cross }} \
