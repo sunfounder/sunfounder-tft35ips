@@ -21,10 +21,11 @@
 # if __has_include(<drm/clients/drm_client_setup.h>)
 #  include <drm/clients/drm_client_setup.h>
 #  define SF_TFT_FBDEV_CLIENT
-# elif __has_include(<drm/drm_fbdev_dma.h>)
+# endif
+# if __has_include(<drm/drm_fbdev_dma.h>)
 #  include <drm/drm_fbdev_dma.h>
 #  define SF_TFT_FBDEV_DMA
-# else
+# elif !defined(SF_TFT_FBDEV_CLIENT)
 #  include <drm/drm_fbdev_generic.h>
 #  define SF_TFT_FBDEV_GENERIC
 # endif
@@ -343,7 +344,7 @@ static const struct drm_driver sunfounder_tft35ips_driver = {
 				  DRIVER_ATOMIC SF_TFT_FBDEV_FEATURE,
 	.fops			= &sunfounder_tft35ips_fops,
 	DRM_GEM_DMA_DRIVER_OPS_VMAP,
-#if defined(SF_TFT_FBDEV_CLIENT) || defined(SF_TFT_FBDEV_DMA)
+#if defined(DRM_FBDEV_DMA_DRIVER_OPS)
 	DRM_FBDEV_DMA_DRIVER_OPS,
 #else
 	.dumb_create		= drm_gem_dma_dumb_create,
