@@ -103,6 +103,28 @@ jobs:
           echo "matrix=$(cat /tmp/matrix.json)" >> "$GITHUB_OUTPUT"
           cat /tmp/matrix.json
 
+  deb:
+    runs-on: ubuntu-latest
+    container: debian:bookworm
+    needs: discover
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends device-tree-compiler dpkg-dev
+
+      - name: Build the DKMS package
+        run: bash packaging/build-deb.sh
+
+      - name: Upload release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.deb
+          fail_on_unmatched_files: true
+
   build:
     needs: discover
     runs-on: ubuntu-24.04-arm

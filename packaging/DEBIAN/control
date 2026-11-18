@@ -1,0 +1,13 @@
+Package: sunfounder-tft35ips-dkms
+Version: 1.0.0
+Section: misc
+Priority: optional
+Architecture: all
+Depends: dkms, device-tree-compiler
+Recommends: python3-evdev, python3-gi, python3-gi-cairo
+Maintainer: SunFounder <service@sunfounder.com>
+Description: DRM driver for the SunFounder 3.5" IPS display (ST7796S)
+ DKMS source package for the sunfounder-tft35ips DRM driver, together with
+ the sf-tft doctor helper and the touch calibration tool. The module is
+ compiled against the running kernel at install time and rebuilt by DKMS
+ after a kernel update.

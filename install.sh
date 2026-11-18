@@ -102,20 +102,27 @@ if [ "${TFT35IPS_BUILD_FROM_SOURCE:-}" = "1" ]; then
     fi
 else
     MOD_ASSET="sunfounder-tft35ips-${KVER}-${ARCH}.ko.xz"
-    if ! curl -fsSL --retry 2 -o "/tmp/$MOD_ASSET" "$RELEASE_URL/$MOD_ASSET"; then
-        die "no prebuilt module for kernel $KVER ($ARCH).
-     Expected asset: $MOD_ASSET
-     The CI builds the two newest kernels of each series (6.6 / 6.12 / 6.18).
+    DEB_ASSET="sunfounder-tft35ips-dkms_${DKMS_VERSION}_all.deb"
+    if curl -fsSL --retry 2 -o "/tmp/$MOD_ASSET" "$RELEASE_URL/$MOD_ASSET"; then
+        xz -df "/tmp/$MOD_ASSET"
+        mkdir -p "/lib/modules/$KVER/updates"
+        install -m 644 "/tmp/${MOD_ASSET%.xz}" "/lib/modules/$KVER/updates/sunfounder-tft35ips.ko"
+        depmod -a
+        ok "prebuilt module installed for $KVER ($ARCH)"
+    elif curl -fsSL --retry 2 -o "/tmp/$DEB_ASSET" "$RELEASE_URL/$DEB_ASSET"; then
+        # no binary for this exact kernel: use the DKMS package, which builds
+        # the module on this machine
+        dpkg -i "/tmp/$DEB_ASSET" || apt-get -f install -y
+        depmod -a >/dev/null 2>&1 || true
+        ok "DKMS package installed (module built for $KVER)"
+    else
+        die "no prebuilt module for kernel $KVER ($ARCH) and the DKMS package
+     could not be downloaded.
      - build locally instead (needs kernel headers for $KVER):
          curl -sSL ... | sudo TFT35IPS_BUILD_FROM_SOURCE=1 bash
      - or ask us to cover this kernel (paste the output of 'uname -r'):
          https://github.com/sunfounder/sunfounder-tft35ips/issues"
     fi
-    xz -df "/tmp/$MOD_ASSET"
-    mkdir -p "/lib/modules/$KVER/updates"
-    install -m 644 "/tmp/${MOD_ASSET%.xz}" "/lib/modules/$KVER/updates/sunfounder-tft35ips.ko"
-    depmod -a
-    ok "prebuilt module installed for $KVER ($ARCH)"
 fi
 
 OVL_ASSET="sunfounder-tft35ips-${KVER}-${ARCH}.dtbo"
