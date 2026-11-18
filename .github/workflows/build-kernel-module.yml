@@ -118,7 +118,7 @@ jobs:
           mkdir -p /tmp/debs /tmp/hdr /usr/src
           cd /tmp/debs
           apt-get download "${{ matrix.headers }}:${{ matrix.debarch }}"
-          apt-get download "${COMMON}:${{ matrix.debarch }}" || true
+          apt-get download "${COMMON}" || true
           for d in *.deb; do dpkg -x "$d" /tmp/hdr; done
           test -d "/tmp/hdr/usr/src/linux-headers-${{ matrix.kernel }}"
           test -d "/tmp/hdr/usr/src/${COMMON}"
