@@ -113,15 +113,18 @@ jobs:
         shell: bash
         run: |
           export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          BASE="$(echo "${{ matrix.kernel }}" | sed 's/+rpt.*//')"
+          COMMON="linux-headers-${BASE}+rpt-common-rpi"
           mkdir -p /tmp/debs /tmp/hdr /usr/src
           cd /tmp/debs
           apt-get download "${{ matrix.headers }}:${{ matrix.debarch }}"
-          apt-get download "linux-headers-${{ matrix.kernel }}+rpt-common-rpi:${{ matrix.debarch }}" || true
+          apt-get download "${COMMON}:${{ matrix.debarch }}" || true
           for d in *.deb; do dpkg -x "$d" /tmp/hdr; done
           test -d "/tmp/hdr/usr/src/linux-headers-${{ matrix.kernel }}"
+          test -d "/tmp/hdr/usr/src/${COMMON}"
           # the variant Makefile includes the common tree by absolute path
           ln -sfn "/tmp/hdr/usr/src/linux-headers-${{ matrix.kernel }}" "/usr/src/linux-headers-${{ matrix.kernel }}"
-          ln -sfn "/tmp/hdr/usr/src/linux-headers-${{ matrix.kernel }}-common-rpi" "/usr/src/linux-headers-${{ matrix.kernel }}-common-rpi"
+          ln -sfn "/tmp/hdr/usr/src/${COMMON}" "/usr/src/${COMMON}"
           echo "headers ready: /usr/src/linux-headers-${{ matrix.kernel }}"
 
       - name: Build module
