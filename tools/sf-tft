@@ -1,0 +1,339 @@
+#!/usr/bin/env python3
+"""sf-tft — SunFounder TFT 3.5" display helper.
+
+Usage:
+    sf-tft doctor [--fix]
+    sf-tft calibrate
+    sf-tft status
+    sf-tft speed [MHz]
+
+doctor checks the driver installation, device-tree overlay, DRM output, touch
+device, calibration, power and kernel log, and prints everything a support
+engineer needs in one screen (the user can screenshot or photograph it).
+--fix repairs the safe, idempotent problems it finds.
+"""
+import glob
+import os
+import platform
+import re
+import subprocess
+import sys
+
+NAME = "sunfounder-tft35ips"
+MODULE = "sunfounder_tft35ips"
+TOUCH_NAME = "ADS7846 Touchscreen"
+CONFIG_CANDIDATES = ["/boot/firmware/config.txt", "/boot/config.txt"]
+CALIB_RULE = "/etc/udev/rules.d/99-ads7846-calibration.rules"
+CALIBRATE_BIN = "/usr/local/bin/touch-calibrate"
+
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+RED = "\033[31m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
+
+
+def say(line="", colour=None):
+    if colour and sys.stdout.isatty():
+        print(colour + str(line) + RESET)
+    else:
+        print(line)
+
+
+def run(cmd, **kw):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, **kw)
+    except FileNotFoundError:
+        return None
+
+
+def config_txt():
+    for p in CONFIG_CANDIDATES:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def overlay_line(config):
+    if not config:
+        return None
+    with open(config, encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            if line.strip().startswith("dtoverlay=" + NAME):
+                return line.strip()
+    return None
+
+
+def module_loaded():
+    return os.path.isdir("/sys/module/" + MODULE)
+
+
+def module_version():
+    r = run(["modinfo", "-F", "version", MODULE])
+    return r.stdout.strip() if r and r.returncode == 0 and r.stdout.strip() else "unknown"
+
+
+def drm_output():
+    for path in sorted(glob.glob("/sys/class/drm/card*-SPI-*")):
+        try:
+            with open(os.path.join(path, "status")) as f:
+                if f.read().strip() != "connected":
+                    continue
+            with open(os.path.join(path, "modes")) as f:
+                modes = [m for m in f.read().split() if m]
+        except OSError:
+            continue
+        return os.path.basename(path), modes
+    return None, []
+
+
+def wayland_env():
+    for sock in glob.glob("/run/user/*/wayland-[0-9]*"):
+        uid = sock.split("/")[3]
+        return uid, "/run/user/" + uid, os.path.basename(sock)
+    return None, None, None
+
+
+def touch_device():
+    for path in sorted(glob.glob("/sys/class/input/event*/device/name")):
+        try:
+            with open(path) as f:
+                if f.read().strip() == TOUCH_NAME:
+                    return "/dev/input/" + path.split("/")[4]
+        except OSError:
+            pass
+    return None
+
+
+def calibration_matrix():
+    dev = touch_device()
+    if not dev:
+        return None
+    r = run(["udevadm", "info", dev])
+    if r:
+        for line in r.stdout.splitlines():
+            if "LIBINPUT_CALIBRATION_MATRIX" in line:
+                return line.split("=", 1)[1].strip()
+    if os.path.isfile(CALIB_RULE):
+        with open(CALIB_RULE) as f:
+            m = re.search(r'LIBINPUT_CALIBRATION_MATRIX\}"([^"]+)"', f.read())
+            if m:
+                return m.group(1)
+    return None
+
+
+def throttled():
+    r = run(["vcgencmd", "get_throttled"])
+    if not r or r.returncode != 0:
+        return None
+    m = re.search(r"0x([0-9a-fA-F]+)", r.stdout)
+    return int(m.group(1), 16) if m else None
+
+
+def ext5v():
+    r = run(["vcgencmd", "pmic_read_adc"])
+    if not r:
+        return None
+    m = re.search(r"EXT5V_V\s+volt\(\d+\)=([0-9.]+)V", r.stdout)
+    return float(m.group(1)) if m else None
+
+
+def dmesg_errors():
+    r = run(["dmesg"])
+    if not r:
+        return []
+    out = []
+    for line in r.stdout.splitlines():
+        low = line.lower()
+        if ("tft35" in low or "spi" in low) and (
+                "error" in low or "fail" in low or "timeout" in low):
+            out.append(line.strip())
+    return out[-5:]
+
+
+class Doctor:
+    def __init__(self):
+        self.errors = 0
+        self.warnings = 0
+
+    def ok(self, msg):
+        say("  [ OK ] " + msg)
+
+    def warn(self, msg, hint):
+        self.warnings += 1
+        say("  [WARN] " + msg, YELLOW)
+        say("         -> " + hint, YELLOW)
+
+    def fail(self, msg, hint):
+        self.errors += 1
+        say("  [FAIL] " + msg, RED)
+        say("         -> " + hint, RED)
+
+    def check(self, ok, msg, hint=None, warn=False):
+        if ok:
+            self.ok(msg)
+        elif warn:
+            self.warn(msg, hint)
+        else:
+            self.fail(msg, hint)
+
+
+def cmd_doctor(fix=False):
+    if fix:
+        apply_fixes()
+
+    d = Doctor()
+    say("%sSunFounder TFT 3.5\" display — doctor%s" % (BOLD, RESET))
+    say("  %s  kernel %s  module %s" % (platform.node(), platform.release(), module_version()))
+    say()
+
+    config = config_txt()
+    line = overlay_line(config)
+    d.check(bool(line), "config.txt: %s" % (line or "dtoverlay missing"),
+            "run: sf-tft doctor --fix")
+
+    d.check(module_loaded(), "kernel module: %s (%s)" % (MODULE, module_version()),
+            "modprobe %s (or reboot)" % MODULE)
+
+    output, modes = drm_output()
+    d.check(bool(output), "DRM output: %s" % (output or "not found"),
+            "check: dmesg | grep tft35")
+    if output and modes:
+        d.ok("modes: %s" % " ".join(modes))
+
+    dev = touch_device()
+    d.check(bool(dev), "touch device: %s" % (dev or "ADS7846 not found"),
+            "check the 40-pin connector and the overlay")
+
+    matrix = calibration_matrix()
+    if matrix:
+        d.ok("calibration: %s" % matrix)
+    else:
+        d.warn("calibration: not set", "run: sf-tft calibrate")
+
+    th = throttled()
+    if th is not None:
+        if th & 0x50000:
+            v = ext5v()
+            d.warn("power: throttled=0x%x%s" % (th, " (EXT5V %.2f V)" % v if v else ""),
+                   "use the official 5V/5A power supply")
+        else:
+            d.ok("power: throttled=0x%x" % th)
+
+    errs = dmesg_errors()
+    if errs:
+        d.warn("dmesg: %d SPI/driver error line(s)" % len(errs),
+               "see: dmesg | grep -i tft35")
+        for e in errs:
+            say("         " + e[:110])
+    else:
+        d.ok("dmesg: no SPI/driver errors")
+
+    say()
+    if d.errors:
+        say("%d error(s), %d warning(s)" % (d.errors, d.warnings), RED)
+        return 1
+    say("no errors, %d warning(s)" % d.warnings, GREEN)
+    return 0
+
+
+def apply_fixes():
+    changed = False
+    config = config_txt()
+    if config and not overlay_line(config):
+        with open(config, "a", encoding="utf-8") as f:
+            f.write("dtoverlay=%s\n" % NAME)
+        say("added dtoverlay=%s to %s" % (NAME, config))
+        changed = True
+    if not module_loaded():
+        r = run(["modprobe", MODULE])
+        say("modprobe %s: %s" % (MODULE, "ok" if r and r.returncode == 0 else "failed"))
+        changed = True
+    run(["udevadm", "control", "--reload-rules"])
+    run(["udevadm", "trigger", "--subsystem-match=input"])
+    say("udev rules reloaded (touch calibration re-applied)")
+    say()
+    if changed:
+        say("A reboot is recommended to apply the driver changes.")
+        say()
+
+
+def cmd_calibrate():
+    if not os.path.isfile(CALIBRATE_BIN):
+        say("touch-calibrate not installed; run the installer first")
+        return 1
+    uid, runtime, display = wayland_env()
+    if not uid:
+        say("no Wayland session found (run this on the desktop)")
+        return 1
+    os.execvp("runuser", ["runuser", "-u", "#" + uid, "--", "env",
+                          "XDG_RUNTIME_DIR=" + runtime,
+                          "WAYLAND_DISPLAY=" + display,
+                          CALIBRATE_BIN])
+
+
+def cmd_status():
+    config = config_txt()
+    say("overlay : %s" % (overlay_line(config) or "not configured"))
+    say("module  : %s (%s)" % ("loaded" if module_loaded() else "not loaded",
+                               module_version()))
+    output, modes = drm_output()
+    say("output  : %s %s" % (output or "-", " ".join(modes)))
+    say("touch   : %s" % (touch_device() or "not found"))
+    say("calib   : %s" % (calibration_matrix() or "not set"))
+    th = throttled()
+    if th is not None:
+        v = ext5v()
+        say("power   : throttled=0x%x%s" % (th, " (EXT5V %.2f V)" % v if v else ""))
+
+
+def cmd_speed(args):
+    config = config_txt()
+    if not config:
+        say("config.txt not found")
+        return 1
+    line = overlay_line(config)
+    if not args:
+        if line:
+            m = re.search(r"speed=(\d+)", line)
+            say("SPI speed: %s" % (m.group(1) + " Hz" if m else "default (125 MHz)"))
+        return 0
+    try:
+        hz = int(float(args[0]) * 1_000_000)
+    except ValueError:
+        say("usage: sf-tft speed [MHz]")
+        return 1
+    if not line:
+        say("overlay is not enabled; run: sf-tft doctor --fix")
+        return 1
+    new = re.sub(r",speed=\d+", "", line) + ",speed=%d" % hz
+    with open(config, encoding="utf-8") as f:
+        text = f.read()
+    text = text.replace(line, new)
+    with open(config, "w", encoding="utf-8") as f:
+        f.write(text)
+    say("set %s (reboot to apply)" % new)
+    return 0
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+    cmd, args = sys.argv[1], sys.argv[2:]
+    if cmd == "doctor":
+        return cmd_doctor(fix="--fix" in args)
+    table = {
+        "calibrate": cmd_calibrate,
+        "status": cmd_status,
+        "speed": lambda: cmd_speed(args),
+    }
+    if cmd not in table:
+        say("unknown command: %s\n" % cmd)
+        print(__doc__)
+        return 2
+    return table[cmd]() or 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

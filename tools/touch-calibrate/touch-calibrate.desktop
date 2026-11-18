@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Touch Calibration (3.5")
+Comment=4-point touchscreen calibration for the SunFounder 3.5" display
+Exec=/usr/local/bin/touch-calibrate
+Icon=input-touchscreen
+Terminal=false
+Categories=Settings;System;

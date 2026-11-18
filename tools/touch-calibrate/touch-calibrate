@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""touch-calibrate — 4-point calibration for the 3.5" panel (labwc/Wayland).
+
+Each target is sampled twice and averaged (2 taps per point, 8 taps total).
+After saving, two buttons: REBOOT & APPLY / EXIT.
+"""
+import sys, subprocess, threading, time
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, Gdk, GLib
+import evdev
+from evdev import ecodes
+
+DEVICE_NAME = "ADS7846 Touchscreen"
+HELPER = ["sudo", "-n", "/usr/local/sbin/apply-touch-calibration"]
+MARGIN = 0.12
+TAPS = 2
+NAMES = ["TOP-LEFT", "TOP-RIGHT", "BOTTOM-LEFT", "BOTTOM-RIGHT"]
+DEBOUNCE = 0.25
+
+
+def solve3(A, b):
+    AtA = [[sum(A[k][i] * A[k][j] for k in range(len(A))) for j in range(3)] for i in range(3)]
+    Atb = [sum(A[k][i] * b[k] for k in range(len(A))) for i in range(3)]
+    M = [row[:] + [Atb[i]] for i, row in enumerate(AtA)]
+    for i in range(3):
+        p = max(range(i, 3), key=lambda r: abs(M[r][i]))
+        if abs(M[p][i]) < 1e-9:
+            raise ValueError("degenerate")
+        M[i], M[p] = M[p], M[i]
+        for r in range(3):
+            if r != i:
+                f = M[r][i] / M[i][i]
+                for c in range(i, 4):
+                    M[r][c] -= f * M[i][c]
+    return [M[i][3] / M[i][i] for i in range(3)]
+
+
+class Calibrator(Gtk.Window):
+    def __init__(self, dev):
+        super().__init__()
+        self.dev = dev
+        self.ax = dev.absinfo(ecodes.ABS_X)
+        self.ay = dev.absinfo(ecodes.ABS_Y)
+        self.set_decorated(False)
+        self.fullscreen()
+
+        self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.area = Gtk.DrawingArea()
+        self.area.connect("draw", self.on_draw)
+        self.box.pack_start(self.area, True, True, 0)
+
+        self.btnbox = Gtk.Box(spacing=10)
+        self.btnbox.set_border_width(6)
+        self.btn_retry = Gtk.Button(label="RETRY")
+        self.btn_reboot = Gtk.Button(label="REBOOT & APPLY")
+        self.btn_exit = Gtk.Button(label="EXIT")
+        self.btn_retry.connect("clicked", lambda b: self.retry())
+        self.btn_reboot.connect("clicked", self.on_reboot)
+        self.btn_exit.connect("clicked", lambda b: Gtk.main_quit())
+        self.btnbox.pack_start(self.btn_retry, True, True, 0)
+        self.btnbox.pack_start(self.btn_reboot, True, True, 0)
+        self.btnbox.pack_start(self.btn_exit, True, True, 0)
+        self.box.pack_start(self.btnbox, False, False, 0)
+        self.add(self.box)
+
+        css = Gtk.CssProvider()
+        css.load_from_data(b"button { font-size: 15px; padding: 5px 8px; }")
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        self.reset()
+        self.connect("key-press-event", self.on_key)
+        self.show_all()
+        self.btnbox.hide()
+        threading.Thread(target=self.read_loop, daemon=True).start()
+        GLib.timeout_add(1000, self.heartbeat)
+
+    def reset(self):
+        self.samples = [[] for _ in range(4)]
+        self.points = []
+        self.idx = 0
+        self.tap_n = 0
+        self.done = False
+        self.last_ts = 0.0
+        self.hb = 0
+        self.message = "TAP THE YELLOW CROSS"
+        self.sub = NAMES[0]
+        if hasattr(self, "btnbox"):
+            self.btnbox.hide()
+
+    def heartbeat(self):
+        self.hb += 1
+        self.queue_draw()
+        return True
+
+    @staticmethod
+    def targets(w, h):
+        m = MARGIN
+        return [(int(w * m), int(h * m)), (int(w * (1 - m)), int(h * m)),
+                (int(w * m), int(h * (1 - m))), (int(w * (1 - m)), int(h * (1 - m)))]
+
+    def on_draw(self, widget, cr):
+        w = widget.get_allocated_width()
+        h = widget.get_allocated_height()
+        bg = [(0.08, 0.09, 0.18), (0.06, 0.16, 0.10), (0.18, 0.10, 0.06), (0.12, 0.12, 0.12)][min(self.idx, 3)]
+        cr.set_source_rgb(*bg)
+        cr.paint()
+        for i, (x, y) in enumerate(self.targets(w, h)):
+            if i < self.idx:
+                col = (0.3, 0.9, 0.3)
+            elif i == self.idx and not self.done:
+                col = (1.0, 0.9, 0.2)
+            else:
+                col = (0.4, 0.4, 0.45)
+            cr.set_source_rgb(*col)
+            cr.set_line_width(3 if i == self.idx else 2)
+            r = 18 if i == self.idx else 14
+            cr.arc(x, y, r, 0, 6.2832)
+            cr.stroke()
+            cr.move_to(x - 28, y); cr.line_to(x + 28, y); cr.stroke()
+            cr.move_to(x, y - 28); cr.line_to(x, y + 28); cr.stroke()
+            if i == self.idx:
+                cr.set_font_size(11)
+                cr.set_source_rgb(1, 1, 1)
+                label = "TAP %d/%d" % (self.tap_n + 1, TAPS)
+                ext = cr.text_extents(label)
+                cr.move_to(x - ext.width / 2, y + r + 14)
+                cr.show_text(label)
+        cr.set_source_rgb(1, 1, 1)
+        cr.select_font_face("Sans", 0, 1)
+        cr.set_font_size(24)
+        step = "POINT %d / 4" % (min(self.idx + 1, 4))
+        ext = cr.text_extents(step)
+        cr.move_to((w - ext.width) / 2, h / 2 - 8)
+        cr.show_text(step)
+        cr.set_font_size(14)
+        ext = cr.text_extents(self.message)
+        cr.move_to((w - ext.width) / 2, h / 2 + 16)
+        cr.show_text(self.message)
+        cr.set_font_size(12)
+        ext = cr.text_extents(self.sub)
+        cr.move_to((w - ext.width) / 2, h - 8)
+        cr.show_text(self.sub)
+        cr.set_font_size(9)
+        cr.set_source_rgb(0.6, 0.6, 0.6)
+        cr.move_to(4, 12)
+        cr.show_text("hb%d" % self.hb)
+        return False
+
+    def read_loop(self):
+        x = y = None
+        for ev in self.dev.read_loop():
+            if ev.type == ecodes.EV_ABS:
+                if ev.code == ecodes.ABS_X:
+                    x = ev.value
+                elif ev.code == ecodes.ABS_Y:
+                    y = ev.value
+            elif ev.type == ecodes.EV_KEY and ev.code == ecodes.BTN_TOUCH:
+                if ev.value == 1 and x is not None and y is not None:
+                    GLib.idle_add(self.add_point, x, y)
+
+    def add_point(self, rx, ry):
+        now = time.time()
+        if self.done or self.idx >= 4:
+            return False
+        if now - self.last_ts < DEBOUNCE:
+            return False
+        self.last_ts = now
+        u = (rx - self.ax.min) / max(1, self.ax.max - self.ax.min)
+        v = (ry - self.ay.min) / max(1, self.ay.max - self.ay.min)
+        # "didn't move to the next cross" guard (only between points)
+        if self.tap_n == 0 and self.points:
+            pu, pv, _, _ = self.points[-1]
+            if abs(u - pu) < 0.05 and abs(v - pv) < 0.05:
+                self.message = "SAME SPOT - tap the YELLOW cross"
+                self.sub = "move to " + NAMES[self.idx]
+                self.queue_draw()
+                return False
+        self.samples[self.idx].append((u, v))
+        self.tap_n += 1
+        print("POINT %d tap %d raw=%d,%d norm=%.4f,%.4f" % (self.idx, self.tap_n, rx, ry, u, v),
+              file=sys.stderr, flush=True)
+        if self.tap_n < TAPS:
+            self.message = "TAP AGAIN (%d/%d) - averaging" % (self.tap_n + 1, TAPS)
+        else:
+            su = sum(s[0] for s in self.samples[self.idx]) / TAPS
+            sv = sum(s[1] for s in self.samples[self.idx]) / TAPS
+            w = self.area.get_allocated_width()
+            h = self.area.get_allocated_height()
+            tx, ty = self.targets(w, h)[self.idx]
+            self.points.append((su, sv, (tx + 0.5) / w, (ty + 0.5) / h))
+            print("POINT %d avg=%.4f,%.4f target=%d,%d" % (self.idx, su, sv, tx, ty),
+                  file=sys.stderr, flush=True)
+            self.idx += 1
+            self.tap_n = 0
+            if self.idx < 4:
+                self.message = "OK - NOW TAP THE YELLOW CROSS"
+                self.sub = "next: " + NAMES[self.idx]
+            else:
+                self.finish()
+        self.queue_draw()
+        return False
+
+    def finish(self):
+        A, bs, bt = [], [], []
+        for u, v, s, t in self.points:
+            A.append((u, v, 1.0)); bs.append(s); bt.append(t)
+        try:
+            a, b, c = solve3(A, bs)
+            d, e, f = solve3(A, bt)
+        except Exception as ex:
+            self.fail("FAILED: %s" % ex)
+            return
+        if max(abs(a), abs(b), abs(d), abs(e)) > 4 or abs(c) > 2 or abs(f) > 2:
+            self.fail("FAILED - tap again")
+            return
+        res = 0.0
+        for (u, v, s, t) in self.points:
+            res = max(res, abs(a * u + b * v + c - s), abs(d * u + e * v + f - t))
+        if res > 0.12:
+            self.fail("TOO INACCURATE (%.2f)" % res)
+            return
+        self.matrix = "%.6f %.6f %.6f %.6f %.6f %.6f 0 0 1" % (a, b, c, d, e, f)
+        print("MATRIX " + self.matrix, file=sys.stderr, flush=True)
+        r = subprocess.run(HELPER + [self.matrix], capture_output=True, text=True)
+        if r.returncode == 0:
+            self.message = "CALIBRATION SAVED"
+            self.sub = "reboot to apply, or exit"
+            self.done = True
+            self.show_buttons(ok=True)
+        else:
+            self.fail("SAVE FAILED")
+        self.queue_draw()
+
+    def show_buttons(self, ok):
+        self.btnbox.show_all()
+        self.btn_retry.set_visible(not ok)
+        self.btn_reboot.set_visible(ok)
+
+    def on_reboot(self, b):
+        subprocess.Popen(["sudo", "-n", "/usr/local/sbin/apply-touch-calibration", "--reboot"])
+        Gtk.main_quit()
+
+    def fail(self, msg):
+        print("FAIL " + msg, file=sys.stderr, flush=True)
+        self.message = msg
+        self.sub = "retry or exit"
+        self.done = True
+        self.show_buttons(ok=False)
+        self.queue_draw()
+
+    def retry(self):
+        self.reset()
+        self.queue_draw()
+        return False
+
+    def on_key(self, w, ev):
+        if ev.keyval == 65307:
+            Gtk.main_quit()
+
+
+def find_device():
+    for p in evdev.list_devices():
+        d = evdev.InputDevice(p)
+        if d.name == DEVICE_NAME:
+            return d
+    return None
+
+
+def main():
+    if "--reset" in sys.argv:
+        r = subprocess.run(HELPER + ["--reset"], capture_output=True, text=True)
+        print(r.stdout or r.stderr)
+        return
+    dev = find_device()
+    if dev is None:
+        print("touch device not found: " + DEVICE_NAME, file=sys.stderr)
+        sys.exit(1)
+    win = Calibrator(dev)
+    win.connect("destroy", Gtk.main_quit)
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    main()
