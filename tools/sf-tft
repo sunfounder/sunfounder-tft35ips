@@ -15,6 +15,7 @@ engineer needs in one screen (the user can screenshot or photograph it).
 import glob
 import os
 import platform
+import pwd
 import re
 import subprocess
 import sys
@@ -90,7 +91,11 @@ def drm_output():
 def wayland_env():
     for sock in glob.glob("/run/user/*/wayland-[0-9]*"):
         uid = sock.split("/")[3]
-        return uid, "/run/user/" + uid, os.path.basename(sock)
+        try:
+            user = pwd.getpwuid(int(uid)).pw_name
+        except (KeyError, ValueError):
+            continue
+        return user, "/run/user/" + uid, os.path.basename(sock)
     return None, None, None
 
 
@@ -262,11 +267,11 @@ def cmd_calibrate():
     if not os.path.isfile(CALIBRATE_BIN):
         say("touch-calibrate not installed; run the installer first")
         return 1
-    uid, runtime, display = wayland_env()
-    if not uid:
+    user, runtime, display = wayland_env()
+    if not user:
         say("no Wayland session found (run this on the desktop)")
         return 1
-    os.execvp("runuser", ["runuser", "-u", "#" + uid, "--", "env",
+    os.execvp("runuser", ["runuser", "-u", user, "--", "env",
                           "XDG_RUNTIME_DIR=" + runtime,
                           "WAYLAND_DISPLAY=" + display,
                           CALIBRATE_BIN])
