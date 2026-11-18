@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+env:
+  # suites to read kernel headers from (newest release first)
+  SUITES: "bookworm trixie"
+
 jobs:
   discover:
     runs-on: ubuntu-latest
@@ -23,7 +27,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl python3 gzip
           mkdir -p /tmp/idx
-          for suite in bookworm trixie; do
+          for suite in $SUITES; do
             for a in arm64 armhf; do
               curl -fsSL "http://archive.raspberrypi.com/debian/dists/$suite/main/binary-$a/Packages.gz" \
                 | gunzip > "/tmp/idx/$a-$suite"
@@ -37,10 +41,11 @@ jobs:
         run: |
           export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           python3 - <<'PY' > /tmp/matrix.json
-          import json, re
+          import json, os, re
 
           found = set()
-          for path in ("/tmp/idx/arm64-bookworm", "/tmp/idx/arm64-trixie"):
+          for suite in os.environ.get("SUITES", "bookworm trixie").split():
+              path = "/tmp/idx/arm64-" + suite
               if not os.path.exists(path):
                   continue
               with open(path) as f:
@@ -60,7 +65,7 @@ jobs:
 
           include = []
           for variant, versions in by_variant.items():
-              for ver in sorted(versions, key=key, reverse=True)[:3]:
+              for ver in sorted(versions, key=key, reverse=True)[:2]:
                   include.append({
                       "headers": "linux-headers-" + ver,
                       "kernel": ver,
@@ -98,10 +103,9 @@ jobs:
           cd /tmp/debs
           curl -fsSL "http://archive.raspberrypi.com/debian/raspberrypi.gpg.key" \
             | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/raspberrypi.gpg
-          echo "deb http://archive.raspberrypi.com/debian bookworm main" \
-            | sudo tee /etc/apt/sources.list.d/raspberrypi.list
-          echo "deb http://archive.raspberrypi.com/debian trixie main" \
-            | sudo tee -a /etc/apt/sources.list.d/raspberrypi.list
+          for suite in $SUITES; do
+            echo "deb http://archive.raspberrypi.com/debian $suite main"
+          done | sudo tee /etc/apt/sources.list.d/raspberrypi.list
           sudo apt-get update
           sudo apt-get download "${{ matrix.headers }}:arm64"
           sudo apt-get download "${COMMON}" || true
