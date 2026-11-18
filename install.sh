@@ -115,7 +115,12 @@ else
     ok "prebuilt module installed for $KVER ($ARCH)"
 fi
 
-install -m 644 "$SRC/driver/sunfounder-tft35ips.dtbo" "$OVERLAY_DIR/sunfounder-tft35ips.dtbo"
+OVL_ASSET="sunfounder-tft35ips-${KVER}-${ARCH}.dtbo"
+if ! curl -fsSL --retry 2 -o "/tmp/$OVL_ASSET" "$RELEASE_URL/$OVL_ASSET"; then
+    dtc -@ -I dts -O dtb -o "/tmp/$OVL_ASSET" "$SRC/driver/sunfounder-tft35ips-overlay.dts" \
+        || die "overlay build failed"
+fi
+install -m 644 "/tmp/$OVL_ASSET" "$OVERLAY_DIR/sunfounder-tft35ips.dtbo"
 ok "overlay installed"
 
 log "4/4 Install tools and enable the overlay"
