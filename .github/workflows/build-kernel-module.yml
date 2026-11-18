@@ -92,7 +92,7 @@ jobs:
           mkdir -p /tmp/debs /tmp/hdr /usr/src
           cd /tmp/debs
           curl -fsSL "http://archive.raspberrypi.com/debian/raspberrypi.gpg.key" \
-            | gpg --dearmor -o /etc/apt/trusted.gpg.d/raspberrypi.gpg
+            | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/raspberrypi.gpg
           echo "deb http://archive.raspberrypi.com/debian bookworm main" \
             | sudo tee /etc/apt/sources.list.d/raspberrypi.list
           sudo apt-get update
