@@ -41,6 +41,11 @@ The installer
 5. installs `sf-tft` and `touch-calibrate` (plus the desktop menu entry);
 6. adds `dtoverlay=sunfounder-tft35ips` to `config.txt`.
 
+When a prebuilt module for the running kernel is available in the GitHub
+release, the installer downloads it instead of compiling (no kernel headers
+needed); otherwise it builds from source. Releases are produced by the
+`build-kernel-module` workflow.
+
 Then reboot. The panel comes up as a standard DRM output at 480x320.
 
 Manual install:
