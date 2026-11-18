@@ -119,9 +119,12 @@ jobs:
           cd /tmp/debs
           apt-get download "${{ matrix.headers }}:${{ matrix.debarch }}"
           apt-get download "${COMMON}" || true
+          apt-get download "linux-kbuild-${BASE}+rpt:${{ matrix.debarch }}" 2>/dev/null \
+            || apt-get download "linux-kbuild-${BASE}+rpt" || true
           for d in *.deb; do dpkg -x "$d" /tmp/hdr; done
           test -d "/tmp/hdr/usr/src/linux-headers-${{ matrix.kernel }}"
           test -d "/tmp/hdr/usr/src/${COMMON}"
+          test -d "/tmp/hdr/usr/lib/linux-kbuild-${BASE}+rpt/scripts"
           # the variant Makefile includes the common tree by absolute path
           ln -sfn "/tmp/hdr/usr/src/linux-headers-${{ matrix.kernel }}" "/usr/src/linux-headers-${{ matrix.kernel }}"
           ln -sfn "/tmp/hdr/usr/src/${COMMON}" "/usr/src/${COMMON}"
