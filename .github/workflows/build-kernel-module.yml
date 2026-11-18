@@ -22,6 +22,8 @@ jobs:
           export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl gnupg python3
+          dpkg --add-architecture arm64
+          dpkg --add-architecture armhf
           curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key \
             | gpg --dearmor -o /etc/apt/trusted.gpg.d/raspberrypi.gpg
           echo "deb http://archive.raspberrypi.com/debian bookworm main" \
