@@ -1,0 +1,29 @@
+#!/bin/bash
+# apply-touch-calibration — write the LIBINPUT_CALIBRATION_MATRIX udev rule.
+# Usage: apply-touch-calibration "a b c d e f 0 0 1"
+#        apply-touch-calibration --reset
+#        apply-touch-calibration --reboot
+set -e
+RULE=/etc/udev/rules.d/99-ads7846-calibration.rules
+if [ "$1" = "--reset" ]; then
+    rm -f "$RULE"
+    udevadm control --reload-rules
+    udevadm trigger --subsystem-match=input
+    echo "calibration reset"
+    exit 0
+fi
+if [ "$1" = "--reboot" ]; then
+    systemctl reboot
+    exit 0
+fi
+MATRIX="$1"
+echo "$MATRIX" | grep -Eq '^-?[0-9]+([.][0-9]+)?( -?[0-9]+([.][0-9]+)?){8}$' || {
+    echo "bad matrix: '$MATRIX'" >&2
+    exit 1
+}
+cat > "$RULE" <<EOF
+SUBSYSTEM=="input", ENV{ID_INPUT_TOUCHSCREEN}=="1", ATTRS{name}=="ADS7846 Touchscreen", ENV{LIBINPUT_CALIBRATION_MATRIX}="$MATRIX"
+EOF
+udevadm control --reload-rules
+udevadm trigger --subsystem-match=input
+echo "installed: $MATRIX"

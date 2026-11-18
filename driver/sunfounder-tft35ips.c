@@ -18,6 +18,7 @@
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_fbdev_dma.h>
+#include <drm/clients/drm_client_setup.h>
 #include <drm/drm_gem_atomic_helper.h>
 #include <drm/drm_gem_dma_helper.h>
 #include <drm/drm_managed.h>
@@ -297,19 +298,29 @@ static const struct drm_simple_display_pipe_funcs waveshare_pipe_funcs = {
 };
 
 static const struct drm_display_mode waveshare_mode = {
-	DRM_SIMPLE_MODE(480, 320, 73, 49),
+	.clock = 480 * 320 * 30 / 1000, /* 30 Hz with 125MHz SPI */
+	.hdisplay = 480,
+	.hsync_start = 480,
+	.hsync_end = 480,
+	.htotal = 480,
+	.vdisplay = 320,
+	.vsync_start = 320,
+	.vsync_end = 320,
+	.vtotal = 320,
+	.width_mm = 73,
+	.height_mm = 49,
 };
 
 DEFINE_DRM_GEM_DMA_FOPS(sunfounder_tft35ips_fops);
 
 static const struct drm_driver sunfounder_tft35ips_driver = {
-	.driver_features	= DRIVER_GEM | DRIVER_MODESET | DRIVER_PRIME | DRIVER_ATOMIC,
+	.driver_features	= DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
 	.fops			= &sunfounder_tft35ips_fops,
 	DRM_GEM_DMA_DRIVER_OPS_VMAP,
+	DRM_FBDEV_DMA_DRIVER_OPS,
 	.debugfs_init		= mipi_dbi_debugfs_init,
 	.name			= "sunfounder-tft35ips",
 	.desc			= "Sunfounder TFT35IPS",
-	.date			= "20251104",
 	.major			= 1,
 	.minor			= 0,
 };
@@ -380,7 +391,7 @@ static int sunfounder_tft35ips_probe(struct spi_device *spi)
 
 	spi_set_drvdata(spi, drm);
 
-	drm_fbdev_dma_setup(drm, 0);
+	drm_client_setup_with_fourcc(drm, DRM_FORMAT_RGB565);
 
 	return 0;
 }
