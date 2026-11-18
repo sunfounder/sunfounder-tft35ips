@@ -2,18 +2,16 @@
 """sf-tft — SunFounder TFT 3.5" display helper.
 
 Usage:
-    sf-tft doctor [--fix] [--report]
+    sf-tft doctor [--fix]
     sf-tft calibrate
     sf-tft status
     sf-tft speed [MHz]
-    sf-tft rotation 0|90|180|270
 
 doctor checks the driver installation, device-tree overlay, DRM output, touch
-device, calibration, power and kernel log. --fix repairs the safe, idempotent
-problems it finds; --report writes a diagnostic bundle to /tmp that can be
-sent to support.
+device, calibration, power and kernel log, and prints everything a support
+engineer needs in one screen (the user can screenshot or photograph it).
+--fix repairs the safe, idempotent problems it finds.
 """
-import datetime
 import glob
 import os
 import platform
@@ -34,14 +32,10 @@ RED = "\033[31m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
-TEXT = []
-
 
 def say(line="", colour=None):
-    line = str(line)
-    TEXT.append(line)
     if colour and sys.stdout.isatty():
-        print(colour + line + RESET)
+        print(colour + str(line) + RESET)
     else:
         print(line)
 
@@ -76,7 +70,7 @@ def module_loaded():
 
 def module_version():
     r = run(["modinfo", "-F", "version", MODULE])
-    return r.stdout.strip() if r and r.returncode == 0 else "unknown"
+    return r.stdout.strip() if r and r.returncode == 0 and r.stdout.strip() else "unknown"
 
 
 def drm_output():
@@ -184,9 +178,13 @@ class Doctor:
             self.fail(msg, hint)
 
 
-def cmd_doctor(report=False):
+def cmd_doctor(fix=False):
+    if fix:
+        apply_fixes()
+
     d = Doctor()
     say("%sSunFounder TFT 3.5\" display — doctor%s" % (BOLD, RESET))
+    say("  %s  kernel %s  module %s" % (platform.node(), platform.release(), module_version()))
     say()
 
     config = config_txt()
@@ -234,75 +232,39 @@ def cmd_doctor(report=False):
     say()
     if d.errors:
         say("%d error(s), %d warning(s)" % (d.errors, d.warnings), RED)
-    else:
-        say("no errors, %d warning(s)" % d.warnings, GREEN)
-
-    if report:
-        path = write_report(d)
-        say("report saved to %s" % path)
-
-    return 1 if d.errors else 0
+        return 1
+    say("no errors, %d warning(s)" % d.warnings, GREEN)
+    return 0
 
 
-def write_report(d):
-    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    path = "/tmp/sf-tft-report-%s.txt" % stamp
-    config = config_txt()
-    dmesg = run(["dmesg"])
-    lines = [
-        "== sf-tft doctor report ==",
-        "time    : %s" % datetime.datetime.now().isoformat(timespec="seconds"),
-        "host    : %s" % platform.node(),
-        "kernel  : %s" % platform.release(),
-        "distro  : %s" % platform.platform(),
-        "module  : %s (%s)" % (MODULE, module_version()),
-        "",
-        "== doctor output ==",
-    ] + TEXT + [
-        "",
-        "== config ==",
-        "%s: %s" % (config or "config.txt", overlay_line(config) or "not enabled"),
-        "",
-        "== dmesg (tail 50) ==",
-    ]
-    if dmesg:
-        lines += dmesg.stdout.splitlines()[-50:]
-    text = "\n".join(lines) + "\n"
-    text = re.sub(r"\x1b\[[0-9;]*m", "", text)  # strip ANSI colours
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.chmod(path, 0o644)
-    return path
-
-
-def cmd_fix():
+def apply_fixes():
     changed = False
     config = config_txt()
     if config and not overlay_line(config):
         with open(config, "a", encoding="utf-8") as f:
             f.write("dtoverlay=%s\n" % NAME)
-        print("added dtoverlay=%s to %s" % (NAME, config))
+        say("added dtoverlay=%s to %s" % (NAME, config))
         changed = True
     if not module_loaded():
         r = run(["modprobe", MODULE])
-        print("modprobe %s: %s" % (MODULE, "ok" if r and r.returncode == 0 else "failed"))
+        say("modprobe %s: %s" % (MODULE, "ok" if r and r.returncode == 0 else "failed"))
         changed = True
     run(["udevadm", "control", "--reload-rules"])
     run(["udevadm", "trigger", "--subsystem-match=input"])
-    print("udev rules reloaded (touch calibration re-applied)")
-    print()
+    say("udev rules reloaded (touch calibration re-applied)")
+    say()
     if changed:
-        print("A reboot is recommended to apply the driver changes.\n")
-    return cmd_doctor()
+        say("A reboot is recommended to apply the driver changes.")
+        say()
 
 
 def cmd_calibrate():
     if not os.path.isfile(CALIBRATE_BIN):
-        print("touch-calibrate not installed; run the installer first")
+        say("touch-calibrate not installed; run the installer first")
         return 1
     uid, runtime, display = wayland_env()
     if not uid:
-        print("no Wayland session found (run this on the desktop)")
+        say("no Wayland session found (run this on the desktop)")
         return 1
     os.execvp("runuser", ["runuser", "-u", "#" + uid, "--", "env",
                           "XDG_RUNTIME_DIR=" + runtime,
@@ -312,37 +274,37 @@ def cmd_calibrate():
 
 def cmd_status():
     config = config_txt()
-    print("overlay : %s" % (overlay_line(config) or "not configured"))
-    print("module  : %s (%s)" % ("loaded" if module_loaded() else "not loaded",
-                                 module_version()))
+    say("overlay : %s" % (overlay_line(config) or "not configured"))
+    say("module  : %s (%s)" % ("loaded" if module_loaded() else "not loaded",
+                               module_version()))
     output, modes = drm_output()
-    print("output  : %s %s" % (output or "-", " ".join(modes)))
-    print("touch   : %s" % (touch_device() or "not found"))
-    print("calib   : %s" % (calibration_matrix() or "not set"))
+    say("output  : %s %s" % (output or "-", " ".join(modes)))
+    say("touch   : %s" % (touch_device() or "not found"))
+    say("calib   : %s" % (calibration_matrix() or "not set"))
     th = throttled()
     if th is not None:
         v = ext5v()
-        print("power   : throttled=0x%x%s" % (th, " (EXT5V %.2f V)" % v if v else ""))
+        say("power   : throttled=0x%x%s" % (th, " (EXT5V %.2f V)" % v if v else ""))
 
 
 def cmd_speed(args):
     config = config_txt()
     if not config:
-        print("config.txt not found")
+        say("config.txt not found")
         return 1
     line = overlay_line(config)
     if not args:
         if line:
             m = re.search(r"speed=(\d+)", line)
-            print("SPI speed: %s" % (m.group(1) + " Hz" if m else "default (125 MHz)"))
+            say("SPI speed: %s" % (m.group(1) + " Hz" if m else "default (125 MHz)"))
         return 0
     try:
         hz = int(float(args[0]) * 1_000_000)
     except ValueError:
-        print("usage: sf-tft speed [MHz]")
+        say("usage: sf-tft speed [MHz]")
         return 1
     if not line:
-        print("overlay is not enabled; run: sf-tft doctor --fix")
+        say("overlay is not enabled; run: sf-tft doctor --fix")
         return 1
     new = re.sub(r",speed=\d+", "", line) + ",speed=%d" % hz
     with open(config, encoding="utf-8") as f:
@@ -350,30 +312,8 @@ def cmd_speed(args):
     text = text.replace(line, new)
     with open(config, "w", encoding="utf-8") as f:
         f.write(text)
-    print("set %s (reboot to apply)" % new)
+    say("set %s (reboot to apply)" % new)
     return 0
-
-
-def cmd_rotation(args):
-    if not args or args[0] not in ("0", "90", "180", "270"):
-        print("usage: sf-tft rotation 0|90|180|270")
-        return 1
-    uid, runtime, display = wayland_env()
-    if not uid:
-        print("no Wayland session found")
-        return 1
-    output, _ = drm_output()
-    if not output:
-        print("display output not found")
-        return 1
-    r = run(["runuser", "-u", "#" + uid, "--", "env",
-             "XDG_RUNTIME_DIR=" + runtime, "WAYLAND_DISPLAY=" + display,
-             "wlr-randr", "--output", output, "--transform", args[0]])
-    if r and r.returncode == 0:
-        print("rotation set to %s (temporary)" % args[0])
-        return 0
-    print("failed to set rotation")
-    return 1
 
 
 def main():
@@ -382,17 +322,14 @@ def main():
         return 0
     cmd, args = sys.argv[1], sys.argv[2:]
     if cmd == "doctor":
-        if "--fix" in args:
-            return cmd_fix()
-        return cmd_doctor(report="--report" in args)
+        return cmd_doctor(fix="--fix" in args)
     table = {
         "calibrate": cmd_calibrate,
         "status": cmd_status,
         "speed": lambda: cmd_speed(args),
-        "rotation": lambda: cmd_rotation(args),
     }
     if cmd not in table:
-        print("unknown command: %s\n" % cmd)
+        say("unknown command: %s\n" % cmd)
         print(__doc__)
         return 2
     return table[cmd]() or 0

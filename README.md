@@ -43,11 +43,9 @@ hint for what to do next.
 
 ```bash
 sudo sf-tft doctor --fix      # repair the safe, idempotent problems
-sudo sf-tft doctor --report   # write /tmp/sf-tft-report-<time>.txt for support
 sudo sf-tft status            # one-screen summary
 sudo sf-tft calibrate         # run the 4-point calibration
 sudo sf-tft speed 48          # store an SPI clock override (MHz) in config.txt
-sudo sf-tft rotation 180      # temporary rotation via wlr-randr
 ```
 
 `doctor --fix` re-adds a missing `dtoverlay`, `modprobe`s the module, reloads
