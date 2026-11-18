@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """touch-calibrate — 4-point calibration for the 3.5" panel (labwc/Wayland).
 
-Each target is sampled twice and averaged (2 taps per point, 8 taps total).
+One tap per target (4 taps total). The same-spot guard rejects a second tap on
+the previous cross, so a stray double-tap cannot shift the next point.
 After saving, two buttons: REBOOT & APPLY / EXIT.
 """
 import sys, subprocess, threading, time
@@ -14,7 +15,7 @@ from evdev import ecodes
 DEVICE_NAME = "ADS7846 Touchscreen"
 HELPER = ["sudo", "-n", "/usr/local/sbin/apply-touch-calibration"]
 MARGIN = 0.12
-TAPS = 2
+TAPS = 1
 NAMES = ["TOP-LEFT", "TOP-RIGHT", "BOTTOM-LEFT", "BOTTOM-RIGHT"]
 DEBOUNCE = 0.25
 
@@ -120,7 +121,7 @@ class Calibrator(Gtk.Window):
             cr.stroke()
             cr.move_to(x - 28, y); cr.line_to(x + 28, y); cr.stroke()
             cr.move_to(x, y - 28); cr.line_to(x, y + 28); cr.stroke()
-            if i == self.idx:
+            if i == self.idx and TAPS > 1:
                 cr.set_font_size(11)
                 cr.set_source_rgb(1, 1, 1)
                 label = "TAP %d/%d" % (self.tap_n + 1, TAPS)
@@ -157,7 +158,12 @@ class Calibrator(Gtk.Window):
                 elif ev.code == ecodes.ABS_Y:
                     y = ev.value
             elif ev.type == ecodes.EV_KEY and ev.code == ecodes.BTN_TOUCH:
-                if ev.value == 1 and x is not None and y is not None:
+                if ev.value == 0:
+                    # pen up: drop the coordinates so a press can only use the
+                    # ABS values that belong to this contact (avoids counting a
+                    # tap with the previous tap's coordinates)
+                    x = y = None
+                elif x is not None and y is not None:
                     GLib.idle_add(self.add_point, x, y)
 
     def add_point(self, rx, ry):
