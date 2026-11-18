@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      kernel:
+        description: "Build one kernel only, e.g. 6.12.109+rpt-rpi-v8 (blank = the matrix)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -40,6 +45,18 @@ jobs:
         shell: bash
         run: |
           export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          if [ -n "${{ inputs.kernel }}" ]; then
+            K="${{ inputs.kernel }}"
+            case "$K" in
+              *2712*) V=2712 ;;
+              *v8*)   V=v8 ;;
+              *)      echo "unsupported kernel: $K" >&2; exit 1 ;;
+            esac
+            printf '[{"headers":"linux-headers-%s","kernel":"%s","variant":"%s"}]' "$K" "$K" "$V" > /tmp/matrix.json
+            echo "matrix=$(cat /tmp/matrix.json)" >> "$GITHUB_OUTPUT"
+            cat /tmp/matrix.json
+            exit 0
+          fi
           python3 - <<'PY' > /tmp/matrix.json
           import json, os, re
 
