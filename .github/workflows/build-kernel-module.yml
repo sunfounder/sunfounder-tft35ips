@@ -21,67 +21,66 @@ jobs:
         run: |
           export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl gnupg python3
-          dpkg --add-architecture arm64
-          dpkg --add-architecture armhf
-          curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key \
-            | gpg --dearmor -o /etc/apt/trusted.gpg.d/raspberrypi.gpg
-          echo "deb http://archive.raspberrypi.com/debian bookworm main" \
-            > /etc/apt/sources.list.d/raspberrypi.list
-          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl python3 gzip
+          mkdir -p /tmp/idx
+          for a in arm64 armhf; do
+            curl -fsSL "http://archive.raspberrypi.com/debian/dists/bookworm/main/binary-$a/Packages.gz" \
+              | gunzip > "/tmp/idx/$a"
+          done
+          wc -l /tmp/idx/*
 
       - name: Generate matrix
         id: gen
+        shell: bash
         run: |
-          python3 - <<'PY'
-          import json, re, subprocess
+          export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          python3 - <<'PY' > /tmp/matrix.json
+          import json, re
 
-          out = subprocess.run(
-              ["apt-cache", "search", "--names-only", r"^linux-headers-.*-rpt-rpi-.*$"],
-              capture_output=True, text=True).stdout
+          found = set()
+          for path in ("/tmp/idx/arm64", "/tmp/idx/armhf"):
+              with open(path) as f:
+                  for line in f:
+                      m = re.match(
+                          r"Package: linux-headers-(\d+\.\d+\.\d+\+rpt-rpi-(?:v6|v7|v7l|v8|2712))$",
+                          line.strip())
+                      if m:
+                          found.add(m.group(1))
 
-          pkgs = {}
-          for line in out.splitlines():
-              name = line.split()[0]
-              m = re.match(r"linux-headers-(\d+\.\d+\.\d+\+rpt-rpi-(v6|v7|v7l|v8|2712))$", name)
-              if m:
-                  pkgs[name] = m.group(1)
+          arch_for = {
+              "v8": ("arm64", "aarch64-linux-gnu-", "arm64"),
+              "2712": ("arm64", "aarch64-linux-gnu-", "arm64"),
+              "v7l": ("arm", "arm-linux-gnueabihf-", "armhf"),
+              "v7": ("arm", "arm-linux-gnueabihf-", "armhf"),
+              "v6": ("arm", "arm-linux-gnueabihf-", "armhf"),
+          }
 
-          def sort_key(v):
+          def key(v):
               m = re.match(r"(\d+)\.(\d+)\.(\d+)", v)
               return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
 
-          # newest two versions per variant
           by_variant = {}
-          for name, ver in pkgs.items():
-              variant = ver.rsplit("-", 1)[1]
-              by_variant.setdefault(variant, set()).add(name)
-
-          arch_for = {"v8": ("arm64", "aarch64-linux-gnu-", "arm64"),
-                      "v7l": ("arm", "arm-linux-gnueabihf-", "armhf"),
-                      "v7": ("arm", "arm-linux-gnueabihf-", "armhf"),
-                      "v6": ("arm", "arm-linux-gnueabihf-", "armhf"),
-                      "2712": ("arm64", "aarch64-linux-gnu-", "arm64")}
+          for ver in found:
+              by_variant.setdefault(ver.rsplit("-", 1)[1], set()).add(ver)
 
           include = []
-          for variant, names in by_variant.items():
+          for variant, versions in by_variant.items():
               if variant not in arch_for:
                   continue
               arch, cross, debarch = arch_for[variant]
-              for name in sorted(names, key=lambda n: sort_key(pkgs[n]), reverse=True)[:2]:
+              for ver in sorted(versions, key=key, reverse=True)[:2]:
                   include.append({
-                      "headers": name,
-                      "kernel": pkgs[name],
+                      "headers": "linux-headers-" + ver,
+                      "kernel": ver,
                       "arch": arch,
                       "cross": cross,
                       "debarch": debarch,
                   })
 
           print(json.dumps(include))
-          with open("/tmp/matrix.json", "w") as f:
-              json.dump(include, f)
           PY
           echo "matrix=$(cat /tmp/matrix.json)" >> "$GITHUB_OUTPUT"
+          cat /tmp/matrix.json
 
   build:
     needs: discover
@@ -134,7 +133,7 @@ jobs:
           cd driver
           dtc -@ -I dts -O dtb -o sunfounder-tft35ips.dtbo sunfounder-tft35ips-overlay.dts
           xz -9 sunfounder-tft35ips.ko
-          ls -l sunfounder-tft35ips.ko.xz sunfounder-tft35ips.dtbo
+          echo "built sunfounder-tft35ips.ko.xz and sunfounder-tft35ips.dtbo"
 
       - name: Stage artifacts
         run: |
