@@ -5,19 +5,19 @@
 #   curl -sSL https://raw.githubusercontent.com/sunfounder/sunfounder-tft35ips/main/install.sh | sudo bash
 #
 # Installs:
-#   - the DRM driver: a prebuilt module from the GitHub release when one
-#     matches the running kernel, otherwise built from source (DKMS when
-#     available)
+#   - the DRM kernel module: downloaded prebuilt from the GitHub release, built
+#     by CI for the running kernel (no kernel headers needed)
 #   - the device-tree overlay
 #   - sf-tft (doctor / calibrate / status) and the touch calibration tool
 #   - dtoverlay=sunfounder-tft35ips in config.txt
 #
 # Environment overrides:
-#   TFT35IPS_LOCAL=/path/to/checkout   build from a local checkout
+#   TFT35IPS_BUILD_FROM_SOURCE=1   compile locally instead of downloading (needs
+#                                  kernel headers; DKMS is used when available)
+#   TFT35IPS_COMMIT=<sha>          install tools/overlay from a specific commit
 #   TFT35IPS_REPO=... TFT35IPS_BRANCH=... TFT35IPS_DIR=...
-#   TFT35IPS_NO_PREBUILT=1             always build from source
-#   TFT35IPS_NO_DKMS=1                 plain make install instead of DKMS
-#   TFT35IPS_NO_REBOOT_PROMPT=1        do not ask to reboot at the end
+#   TFT35IPS_RELEASES=<url>        release download base URL
+#   TFT35IPS_NO_REBOOT_PROMPT=1    do not ask to reboot at the end
 
 set -e
 
@@ -62,56 +62,34 @@ done
 
 log "1/4 Install dependencies"
 apt-get update -qq || warn "apt-get update failed, continuing"
-apt-get install -y git build-essential device-tree-compiler dkms \
-    python3-evdev python3-gi python3-gi-cairo >/dev/null || warn "some packages were not installed"
+apt-get install -y git device-tree-compiler python3-evdev python3-gi python3-gi-cairo \
+    >/dev/null || warn "some packages were not installed"
 ok "dependencies"
 
-PREBUILT=0
-log "2/4 Driver module"
-if [ -z "${TFT35IPS_NO_PREBUILT:-}" ]; then
-    MOD_ASSET="sunfounder-tft35ips-${KVER}-${ARCH}.ko.xz"
-    OVL_ASSET="sunfounder-tft35ips-${KVER}-${ARCH}.dtbo"
-    if curl -fsSL --retry 2 -o "/tmp/$MOD_ASSET" "$RELEASE_URL/$MOD_ASSET"; then
-        xz -df "/tmp/$MOD_ASSET"
-        mkdir -p "/lib/modules/$KVER/updates"
-        install -m 644 "/tmp/${MOD_ASSET%.xz}" "/lib/modules/$KVER/updates/sunfounder-tft35ips.ko"
-        depmod -a
-        if curl -fsSL --retry 2 -o "/tmp/$OVL_ASSET" "$RELEASE_URL/$OVL_ASSET"; then
-            install -m 644 "/tmp/$OVL_ASSET" "$OVERLAY_DIR/sunfounder-tft35ips.dtbo"
-        fi
-        PREBUILT=1
-        ok "prebuilt module installed (kernel $KVER, $ARCH)"
-    fi
-fi
+log "2/4 Download files"
+rm -rf "$INSTALL_DIR"
+git clone --depth=1 --branch "$DRIVER_BRANCH" "$DRIVER_REPO" "$INSTALL_DIR"
+chown -R "$USER_NAME:$USER_NAME" "$INSTALL_DIR"
+SRC="$INSTALL_DIR"
+ok "repository cloned to $INSTALL_DIR"
 
-if [ "$PREBUILT" -eq 0 ]; then
-    log "2/4 Build driver from source"
+log "3/4 Install driver module"
+if [ "${TFT35IPS_BUILD_FROM_SOURCE:-}" = "1" ]; then
+    apt-get install -y build-essential dkms >/dev/null || warn "some packages were not installed"
     if [ ! -d "/usr/src/linux-headers-$KVER" ]; then
         apt-get install -y "linux-headers-$KVER" >/dev/null 2>&1 \
             || apt-get install -y raspberrypi-kernel-headers >/dev/null 2>&1 \
             || true
     fi
-    [ -d "/usr/src/linux-headers-$KVER" ] || die "kernel headers for $KVER are missing (install linux-headers-$KVER or use a prebuilt release)"
+    [ -d "/usr/src/linux-headers-$KVER" ] || die "kernel headers for $KVER are missing"
 
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
-    if [ -n "${TFT35IPS_LOCAL:-}" ] && [ -d "$TFT35IPS_LOCAL" ]; then
-        SRC="$TFT35IPS_LOCAL"
-    elif [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/driver/sunfounder-tft35ips.c" ]; then
-        SRC="$SCRIPT_DIR"
-    else
-        rm -rf "$INSTALL_DIR"
-        git clone --depth=1 --branch "$DRIVER_BRANCH" "$DRIVER_REPO" "$INSTALL_DIR"
-        chown -R "$USER_NAME:$USER_NAME" "$INSTALL_DIR"
-        SRC="$INSTALL_DIR"
-    fi
     make -C "$SRC/driver" clean >/dev/null 2>&1 || true
     make -C "$SRC/driver" || die "driver build failed"
-
-    if [ -z "${TFT35IPS_NO_DKMS:-}" ] && command -v dkms >/dev/null 2>&1; then
-        rm -rf "$DKMS_SRC"
-        install -d "$DKMS_SRC"
-        cp -a "$SRC/driver/." "$DKMS_SRC/"
-        cp "$SRC/dkms.conf" "$DKMS_SRC/dkms.conf"
+    rm -rf "$DKMS_SRC"
+    install -d "$DKMS_SRC"
+    cp -a "$SRC/driver/." "$DKMS_SRC/"
+    cp "$SRC/dkms.conf" "$DKMS_SRC/dkms.conf"
+    if command -v dkms >/dev/null 2>&1; then
         dkms remove -m sunfounder-tft35ips -v "$DKMS_VERSION" --all >/dev/null 2>&1 || true
         dkms add -m sunfounder-tft35ips -v "$DKMS_VERSION" >/dev/null
         dkms build -m sunfounder-tft35ips -v "$DKMS_VERSION" >/dev/null
@@ -122,31 +100,25 @@ if [ "$PREBUILT" -eq 0 ]; then
         depmod -a
         ok "driver built and installed"
     fi
-    install -m 644 "$SRC/driver/sunfounder-tft35ips.dtbo" "$OVERLAY_DIR/sunfounder-tft35ips.dtbo"
+else
+    MOD_ASSET="sunfounder-tft35ips-${KVER}-${ARCH}.ko.xz"
+    if ! curl -fsSL --retry 2 -o "/tmp/$MOD_ASSET" "$RELEASE_URL/$MOD_ASSET"; then
+        die "no prebuilt module for kernel $KVER ($ARCH).
+     Expected asset: $MOD_ASSET
+     Supported kernels are built by CI; run 'uname -r' and open an issue if yours is missing.
+     To compile locally instead (needs kernel headers): re-run with TFT35IPS_BUILD_FROM_SOURCE=1"
+    fi
+    xz -df "/tmp/$MOD_ASSET"
+    mkdir -p "/lib/modules/$KVER/updates"
+    install -m 644 "/tmp/${MOD_ASSET%.xz}" "/lib/modules/$KVER/updates/sunfounder-tft35ips.ko"
+    depmod -a
+    ok "prebuilt module installed for $KVER ($ARCH)"
 fi
 
-if [ ! -f "$OVERLAY_DIR/sunfounder-tft35ips.dtbo" ]; then
-    # prebuilt module was used but the overlay asset was missing: build it
-    SRC="${SRC:-$INSTALL_DIR}"
-    if [ ! -f "$SRC/driver/sunfounder-tft35ips-overlay.dts" ]; then
-        rm -rf "$INSTALL_DIR"
-        git clone --depth=1 --branch "$DRIVER_BRANCH" "$DRIVER_REPO" "$INSTALL_DIR"
-        SRC="$INSTALL_DIR"
-    fi
-    dtc -@ -I dts -O dtb -o /tmp/sunfounder-tft35ips.dtbo \
-        "$SRC/driver/sunfounder-tft35ips-overlay.dts"
-    install -m 644 /tmp/sunfounder-tft35ips.dtbo "$OVERLAY_DIR/sunfounder-tft35ips.dtbo"
-fi
+install -m 644 "$SRC/driver/sunfounder-tft35ips.dtbo" "$OVERLAY_DIR/sunfounder-tft35ips.dtbo"
 ok "overlay installed"
 
-log "3/4 Install tools"
-SRC="${SRC:-$INSTALL_DIR}"
-if [ ! -f "$SRC/tools/sf-tft" ]; then
-    rm -rf "$INSTALL_DIR"
-    git clone --depth=1 --branch "$DRIVER_BRANCH" "$DRIVER_REPO" "$INSTALL_DIR"
-    chown -R "$USER_NAME:$USER_NAME" "$INSTALL_DIR"
-    SRC="$INSTALL_DIR"
-fi
+log "4/4 Install tools and enable the overlay"
 install -m 755 "$SRC/tools/sf-tft" /usr/local/bin/sf-tft
 install -m 755 "$SRC/tools/touch-calibrate/touch-calibrate" /usr/local/bin/touch-calibrate
 install -m 755 "$SRC/tools/touch-calibrate/apply-touch-calibration" /usr/local/sbin/apply-touch-calibration
@@ -158,7 +130,6 @@ install -m 644 "$SRC/tools/touch-calibrate/touch-calibrate.desktop" \
     /usr/share/applications/touch-calibrate.desktop
 ok "sf-tft and touch-calibrate installed"
 
-log "4/4 Enable overlay"
 if grep -q '^dtoverlay=sunfounder-tft35ips' "$CONFIG_TXT"; then
     ok "dtoverlay=sunfounder-tft35ips already enabled"
 else
