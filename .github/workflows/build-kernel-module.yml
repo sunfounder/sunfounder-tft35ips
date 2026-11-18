@@ -23,9 +23,11 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl python3 gzip
           mkdir -p /tmp/idx
-          for a in arm64 armhf; do
-            curl -fsSL "http://archive.raspberrypi.com/debian/dists/bookworm/main/binary-$a/Packages.gz" \
-              | gunzip > "/tmp/idx/$a"
+          for suite in bookworm trixie; do
+            for a in arm64 armhf; do
+              curl -fsSL "http://archive.raspberrypi.com/debian/dists/$suite/main/binary-$a/Packages.gz" \
+                | gunzip > "/tmp/idx/$a-$suite"
+            done
           done
           wc -l /tmp/idx/*
 
@@ -38,12 +40,15 @@ jobs:
           import json, re
 
           found = set()
-          with open("/tmp/idx/arm64") as f:
-              for line in f:
-                  m = re.match(r"Package: linux-headers-(\d+\.\d+\.\d+\+rpt-rpi-(?:v8|2712))$",
-                               line.strip())
-                  if m:
-                      found.add(m.group(1))
+          for path in ("/tmp/idx/arm64-bookworm", "/tmp/idx/arm64-trixie"):
+              if not os.path.exists(path):
+                  continue
+              with open(path) as f:
+                  for line in f:
+                      m = re.match(r"Package: linux-headers-(\d+\.\d+\.\d+\+rpt-rpi-(?:v8|2712))$",
+                                   line.strip())
+                      if m:
+                          found.add(m.group(1))
 
           def key(v):
               m = re.match(r"(\d+)\.(\d+)\.(\d+)", v)
@@ -95,6 +100,8 @@ jobs:
             | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/raspberrypi.gpg
           echo "deb http://archive.raspberrypi.com/debian bookworm main" \
             | sudo tee /etc/apt/sources.list.d/raspberrypi.list
+          echo "deb http://archive.raspberrypi.com/debian trixie main" \
+            | sudo tee -a /etc/apt/sources.list.d/raspberrypi.list
           sudo apt-get update
           sudo apt-get download "${{ matrix.headers }}:arm64"
           sudo apt-get download "${COMMON}" || true

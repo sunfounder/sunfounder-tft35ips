@@ -151,20 +151,30 @@ class Calibrator(Gtk.Window):
 
     def read_loop(self):
         x = y = None
+        pending = False
         for ev in self.dev.read_loop():
             if ev.type == ecodes.EV_ABS:
                 if ev.code == ecodes.ABS_X:
                     x = ev.value
                 elif ev.code == ecodes.ABS_Y:
                     y = ev.value
+                # a press that arrived before the coordinates: take the point
+                # as soon as this contact has both ABS values
+                if pending and x is not None and y is not None:
+                    pending = False
+                    GLib.idle_add(self.add_point, x, y)
             elif ev.type == ecodes.EV_KEY and ev.code == ecodes.BTN_TOUCH:
                 if ev.value == 0:
-                    # pen up: drop the coordinates so a press can only use the
-                    # ABS values that belong to this contact (avoids counting a
-                    # tap with the previous tap's coordinates)
+                    # pen up: drop the coordinates so the next press can only
+                    # use the ABS values that belong to its own contact
+                    pending = False
                     x = y = None
                 elif x is not None and y is not None:
                     GLib.idle_add(self.add_point, x, y)
+                else:
+                    # pen down reported before the coordinates (ADS7846 can do
+                    # this on the first sample); wait for the ABS pair
+                    pending = True
 
     def add_point(self, rx, ry):
         now = time.time()
