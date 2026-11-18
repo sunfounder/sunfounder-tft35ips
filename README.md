@@ -8,7 +8,7 @@ display (480x320, ST7796S + XPT2046 resistive touch) on Raspberry Pi 4/5.
 Quick install (Raspberry Pi OS Bookworm / Trixie):
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/sunfounder/sunfounder-installer-scripts/main/install-tft35ips.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/sunfounder/sunfounder-tft35ips/main/install.sh | sudo bash
 ```
 
 The installer
@@ -26,11 +26,8 @@ Manual install:
 
 ```bash
 git clone https://github.com/sunfounder/sunfounder-tft35ips
-cd sunfounder-tft35ips/driver
-make all
-sudo make install
-sudo dtoverlay_check ... # or add dtoverlay=sunfounder-tft35ips to /boot/firmware/config.txt
-sudo reboot
+cd sunfounder-tft35ips
+sudo bash install.sh
 ```
 
 ## Pin definition
