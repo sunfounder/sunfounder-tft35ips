@@ -1,11 +1,30 @@
-# SunFounder TFT 3.5 inch IPS display (ST7796S, 16-bit command variant)
+# SunFounder TFT 3.5 inch IPS display (ST7796S)
 
-DRM driver and 4-point touch calibration for the SunFounder 3.5" IPS TFT
-display (480x320, ST7796S + XPT2046 resistive touch) on Raspberry Pi 4/5.
+DRM driver, touch calibration and a `doctor` self-check tool for the
+SunFounder 3.5" IPS TFT display (480x320, ST7796S + XPT2046 resistive touch)
+on Raspberry Pi 4 / 5.
+
+## Features
+
+- standard **DRM/KMS** output (no fbtft), works with labwc/Wayland, the
+  console and X11
+- **30 Hz display mode** matched to the panel's SPI bandwidth (declaring
+  60 Hz over-drives the SPI and shows up as laggy input: "clicks do nothing",
+  text input stalls)
+- display SPI **125 MHz**, touch SPI **2 MHz**
+- **DKMS**: the module is rebuilt automatically after a kernel update
+- **4-point touch calibration** that works on Wayland (libinput calibration
+  matrix through udev)
+- **`sf-tft doctor`** self-check for users and support (`--fix`, `status`,
+  `calibrate`, `speed`)
+
+## Supported systems
+
+- Raspberry Pi 4 / 5
+- Raspberry Pi OS Bullseye (kernel 6.1), Bookworm (6.6), Trixie (6.18)
+- Debian 64-bit
 
 ## Install
-
-Quick install (Raspberry Pi OS Bookworm / Trixie):
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/sunfounder/sunfounder-tft35ips/main/install.sh | sudo bash
@@ -13,14 +32,16 @@ curl -sSL https://raw.githubusercontent.com/sunfounder/sunfounder-tft35ips/main/
 
 The installer
 
-1. installs `build-essential`, `dtc`, kernel headers and the Python deps;
+1. installs `build-essential`, `dtc`, `dkms`, kernel headers and the Python
+   dependencies (`python3-evdev`, `python3-gi`);
 2. clones this repository to `~/sunfounder-tft35ips`;
-3. builds and installs `sunfounder-tft35ips.ko` + the device-tree overlay;
-4. installs the touch calibration tool (`touch-calibrate`);
-5. adds `dtoverlay=sunfounder-tft35ips` to `config.txt`.
+3. builds the module and the device-tree overlay;
+4. installs the module through **DKMS** (or `make install` when DKMS is not
+   available);
+5. installs `sf-tft` and `touch-calibrate` (plus the desktop menu entry);
+6. adds `dtoverlay=sunfounder-tft35ips` to `config.txt`.
 
-Then reboot. The panel comes up as a standard DRM output (480x320). For the
-desktop run **Touch Calibration** once from the menu.
+Then reboot. The panel comes up as a standard DRM output at 480x320.
 
 Manual install:
 
@@ -36,10 +57,25 @@ sudo bash install.sh
 sudo sf-tft doctor
 ```
 
-`doctor` checks the device-tree overlay, the kernel module, the DRM output,
-the touch device, the calibration matrix, the power supply (undervoltage) and
-recent kernel log lines. Every line is `[ OK ]`, `[WARN]` or `[FAIL]` with a
-hint for what to do next.
+```
+SunFounder TFT 3.5" display — doctor
+  raspberrypi  kernel 6.6.31+rpt-rpi-v8  module 1.0.0
+
+  [ OK ] config.txt: dtoverlay=sunfounder-tft35ips
+  [ OK ] kernel module: sunfounder_tft35ips (1.0.0)
+  [ OK ] DRM output: card2-SPI-1
+  [ OK ] modes: 480x320
+  [ OK ] touch device: /dev/input/event6
+  [ OK ] calibration: 1.103244 0.002193 -0.031371 0.000596 1.124846 -0.064564 0 0 1
+  [WARN] power: throttled=0x50000 (EXT5V 4.91 V)
+         -> use the official 5V/5A power supply
+  [ OK ] dmesg: no SPI/driver errors
+
+no errors, 1 warning(s)
+```
+
+Every line is `[ OK ]`, `[WARN]` or `[FAIL]` followed by what to do next, so a
+photo or screenshot of the output is usually enough for support.
 
 ```bash
 sudo sf-tft doctor --fix      # repair the safe, idempotent problems
@@ -52,8 +88,17 @@ sudo sf-tft speed 48          # store an SPI clock override (MHz) in config.txt
 the udev rules (which re-applies the touch calibration) and then re-runs the
 checks. It never reboots, flashes firmware or deletes anything.
 
-The doctor convention (required checks, output format, `--fix` boundaries,
-`--report` bundle) is described in the `doctor` skill.
+The doctor convention (required checks, output format, `--fix` boundaries) is
+described in the `doctor` skill.
+
+## Touch calibration
+
+`tools/touch-calibrate/` contains a small GTK3 tool (Wayland/labwc friendly)
+that samples four targets twice, solves the affine raw->screen transform and
+installs it as the libinput calibration matrix through udev. Run
+**Touch Calibration** from the menu, or `sudo sf-tft calibrate`.
+
+See `tools/touch-calibrate/README.md` for details.
 
 ## DKMS
 
@@ -82,13 +127,13 @@ the generic `panel-mipi-dbi` driver (8-bit DBI).
 The stock kernel `ili9486.c` driver was forked for this panel. Changes made
 here:
 
-- **kernel 6.18 compatibility**: dropped `DRIVER_PRIME` / `.date`, added
-  `DRM_FBDEV_DMA_DRIVER_OPS`, replaced `drm_fbdev_dma_setup()` with
-  `drm_client_setup_with_fourcc()`;
+- **kernel compatibility**: the fbdev setup API is chosen at compile time
+  (`drm_client_setup_with_fourcc` on 6.11+, `drm_fbdev_dma_setup` on 6.4-6.10,
+  `drm_fbdev_generic_setup` below), `DRIVER_PRIME` is only used when the
+  kernel still defines it;
 - **30 Hz display mode** (480x320 at 30 Hz). Declaring 60 Hz makes the
-  compositor queue frames faster than the SPI can push them, which shows up as
-  laggy input ("clicks do nothing", text input stalls). 30 Hz matches the
-  panel's SPI bandwidth;
+  compositor queue frames faster than the SPI can push them, which shows up
+  as laggy input. 30 Hz matches the panel's SPI bandwidth;
 - **SPI 125 MHz** for pixel data (the module's bridge supports it). Lower it
   in `config.txt` if the ribbon is long or the power supply is weak:
 
@@ -98,12 +143,18 @@ here:
 
 - **touch SPI 2 MHz** (the XPT2046 maximum is 3.25 MHz).
 
-## Touch calibration
+## Uninstall
 
-`tools/touch-calibrate/` contains a small GTK3 tool (Wayland/labwc friendly)
-that samples four targets twice, solves the affine raw->screen transform and
-installs it as the libinput calibration matrix via udev. See
-`tools/touch-calibrate/README.md`.
+```bash
+sudo dkms remove -m sunfounder-tft35ips -v 1.0.0 --all
+sudo rm -f /usr/local/bin/sf-tft /usr/local/bin/touch-calibrate
+sudo rm -f /usr/local/sbin/apply-touch-calibration
+sudo rm -f /etc/sudoers.d/touch-calibrate
+sudo rm -f /usr/share/applications/touch-calibrate.desktop
+sudo rm -f /boot/firmware/overlays/sunfounder-tft35ips.dtbo
+sudo sed -i '/dtoverlay=sunfounder-tft35ips/d' /boot/firmware/config.txt
+sudo reboot
+```
 
 ## Debug
 
