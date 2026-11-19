@@ -5,7 +5,6 @@ Usage:
     sf-tft doctor [--fix]
     sf-tft calibrate
     sf-tft status
-    sf-tft speed [MHz]
 
 doctor checks the driver installation, device-tree overlay, DRM output, touch
 device, calibration, power and kernel log, and prints everything a support
@@ -292,35 +291,6 @@ def cmd_status():
         say("power   : throttled=0x%x%s" % (th, " (EXT5V %.2f V)" % v if v else ""))
 
 
-def cmd_speed(args):
-    config = config_txt()
-    if not config:
-        say("config.txt not found")
-        return 1
-    line = overlay_line(config)
-    if not args:
-        if line:
-            m = re.search(r"speed=(\d+)", line)
-            say("SPI speed: %s" % (m.group(1) + " Hz" if m else "default (125 MHz)"))
-        return 0
-    try:
-        hz = int(float(args[0]) * 1_000_000)
-    except ValueError:
-        say("usage: sf-tft speed [MHz]")
-        return 1
-    if not line:
-        say("overlay is not enabled; run: sf-tft doctor --fix")
-        return 1
-    new = re.sub(r",speed=\d+", "", line) + ",speed=%d" % hz
-    with open(config, encoding="utf-8") as f:
-        text = f.read()
-    text = text.replace(line, new)
-    with open(config, "w", encoding="utf-8") as f:
-        f.write(text)
-    say("set %s (reboot to apply)" % new)
-    return 0
-
-
 def main():
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print(__doc__)
@@ -331,7 +301,6 @@ def main():
     table = {
         "calibrate": cmd_calibrate,
         "status": cmd_status,
-        "speed": lambda: cmd_speed(args),
     }
     if cmd not in table:
         say("unknown command: %s\n" % cmd)
