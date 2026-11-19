@@ -16,20 +16,6 @@
 		};
 	};
 
-	fragment@1 {
-		target = <&spidev0>;
-		__overlay__ {
-			status = "disabled";
-		};
-	};
-
-	fragment@2 {
-		target = <&spidev1>;
-		__overlay__ {
-			status = "disabled";
-		};
-	};
-
 	fragment@3 {
 		target = <&gpio>;
 		__overlay__ {
@@ -46,6 +32,18 @@
 			/* needed to avoid dtc warning */
 			#address-cells = <1>;
 			#size-cells = <0>;
+
+			/*
+			 * Disable the default spidev nodes by name (not by label):
+			 * some distro DTBs do not export the spidev0/spidev1 labels,
+			 * and leaving them enabled makes chip-select 0/1 collide.
+			 */
+			spidev@0 {
+				status = "disabled";
+			};
+			spidev@1 {
+				status = "disabled";
+			};
 
 			sunfounder_tft35ips: sunfounder_tft35ips@0{
 			    compatible = "sunfounder,tft35ips";

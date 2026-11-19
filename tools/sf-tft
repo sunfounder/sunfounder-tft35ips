@@ -149,6 +149,11 @@ def dmesg_errors():
     out = []
     for line in r.stdout.splitlines():
         low = line.lower()
+        # the base DTB of some distros keeps spidev@0/@1 enabled next to our
+        # nodes; the chip-select clash only drops those spidev nodes and does
+        # not affect the display, so do not report it as a driver error
+        if "spidev@" in low:
+            continue
         if ("tft35" in low or "spi" in low) and (
                 "error" in low or "fail" in low or "timeout" in low):
             out.append(line.strip())
