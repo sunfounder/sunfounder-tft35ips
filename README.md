@@ -16,7 +16,7 @@ on Raspberry Pi 4 / 5.
 - **4-point touch calibration** that works on Wayland (libinput calibration
   matrix through udev)
 - **`sf-tft doctor`** self-check for users and support (`--fix`, `status`,
-  `calibrate`, `speed`)
+  `calibrate`)
 
 ## Supported systems
 
@@ -86,7 +86,6 @@ photo or screenshot of the output is usually enough for support.
 sudo sf-tft doctor --fix      # repair the safe, idempotent problems
 sudo sf-tft status            # one-screen summary
 sudo sf-tft calibrate         # run the 4-point calibration
-sudo sf-tft speed 48          # store an SPI clock override (MHz) in config.txt
 ```
 
 `doctor --fix` re-adds a missing `dtoverlay`, `modprobe`s the module, reloads
