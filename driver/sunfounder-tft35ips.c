@@ -194,8 +194,17 @@ static void waveshare_enable(struct drm_simple_display_pipe *pipe,
 	ret = mipi_dbi_poweron_conditional_reset(dbidev);
 	if (ret < 0)
 		goto out_exit;
-	if (ret == 1)
+	if (ret == 1) {
+		/*
+		 * The panel is still powered (we come back from DPMS off, not
+		 * from a power cycle): wake it up again, otherwise the display
+		 * stays blank while the framebuffer keeps updating.
+		 */
+		mipi_dbi_command(dbi, ST7796_SLPOUT);
+		msleep(120);
+		mipi_dbi_command(dbi, MIPI_DCS_SET_DISPLAY_ON);
 		goto out_enable;
+	}
 
 	mipi_dbi_command(dbi, MIPI_DCS_SET_DISPLAY_OFF);
 	msleep(120);
