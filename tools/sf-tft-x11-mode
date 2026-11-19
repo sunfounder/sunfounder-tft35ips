@@ -1,0 +1,21 @@
+#!/bin/sh
+# Put the SPI panel into its native mode on X11 desktops (Xorg may otherwise
+# keep a 1024x768 screen because the HDMI outputs are present but unused).
+[ -n "$DISPLAY" ] || exit 0
+command -v xrandr >/dev/null 2>&1 || exit 0
+
+out=""
+xrandr --query 2>/dev/null | while read -r line; do
+    case "$line" in
+        *" connected"*)
+            out=${line%% *}
+            ;;
+        *480x320*)
+            if [ -n "$out" ]; then
+                xrandr --output "$out" --mode 480x320 --primary >/dev/null 2>&1
+                out=""
+            fi
+            ;;
+    esac
+done
+exit 0
