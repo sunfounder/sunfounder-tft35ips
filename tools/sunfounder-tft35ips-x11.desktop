@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=SunFounder TFT 3.5" mode
+Comment=Set the SPI panel to 480x320 on X11 desktops
+Exec=/usr/local/bin/sf-tft-x11-mode
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

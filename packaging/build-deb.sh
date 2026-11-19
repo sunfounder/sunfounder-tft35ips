@@ -32,6 +32,10 @@ install -m 755 "$ROOT/tools/touch-calibrate/apply-touch-calibration" \
     "$STAGE/usr/local/sbin/apply-touch-calibration"
 install -m 644 "$ROOT/tools/touch-calibrate/touch-calibrate.desktop" \
     "$STAGE/usr/share/applications/touch-calibrate.desktop"
+install -m 755 "$ROOT/tools/sf-tft-x11-mode" "$STAGE/usr/local/bin/sf-tft-x11-mode"
+mkdir -p "$STAGE/etc/xdg/autostart"
+install -m 644 "$ROOT/tools/sunfounder-tft35ips-x11.desktop" \
+    "$STAGE/etc/xdg/autostart/sunfounder-tft35ips-x11.desktop"
 printf '%%sudo ALL=(root) NOPASSWD: /usr/local/sbin/apply-touch-calibration\n' \
     > "$STAGE/etc/sudoers.d/touch-calibrate"
 chmod 440 "$STAGE/etc/sudoers.d/touch-calibrate"

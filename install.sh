@@ -143,6 +143,10 @@ chmod 440 /etc/sudoers.d/touch-calibrate
 visudo -cf /etc/sudoers.d/touch-calibrate >/dev/null
 install -m 644 "$SRC/tools/touch-calibrate/touch-calibrate.desktop" \
     /usr/share/applications/touch-calibrate.desktop
+install -m 755 "$SRC/tools/sf-tft-x11-mode" /usr/local/bin/sf-tft-x11-mode
+mkdir -p /etc/xdg/autostart
+install -m 644 "$SRC/tools/sunfounder-tft35ips-x11.desktop" \
+    /etc/xdg/autostart/sunfounder-tft35ips-x11.desktop
 ok "sf-tft and touch-calibrate installed"
 
 if grep -q '^dtoverlay=sunfounder-tft35ips' "$CONFIG_TXT"; then
