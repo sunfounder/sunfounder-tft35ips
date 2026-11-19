@@ -364,6 +364,8 @@ MODULE_DEVICE_TABLE(of, sunfounder_tft35ips_of_match);
 
 static const struct spi_device_id sunfounder_tft35ips_id[] = {
 	{ "sunfounder-tft35ips", 0 },
+	/* modalias generated from compatible = "sunfounder,tft35ips" */
+	{ "tft35ips", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(spi, sunfounder_tft35ips_id);
