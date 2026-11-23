@@ -4,7 +4,7 @@
 Usage:
     sf-tft doctor [--fix]
     sf-tft calibrate
-    sf-tft test
+    sf-tft cali-test
     sf-tft status
 
 doctor checks the driver installation, device-tree overlay, DRM output, touch
@@ -314,7 +314,7 @@ def apply_fixes():
         say()
 
 
-def cmd_test():
+def cmd_cali_test():
     """Open the touch test canvas without recalibrating."""
     if not os.path.isfile(CALIBRATE_BIN):
         say("touch-calibrate not installed; run the installer first")
@@ -374,7 +374,7 @@ def main():
         return cmd_doctor(fix="--fix" in args)
     table = {
         "calibrate": cmd_calibrate,
-        "test": cmd_test,
+        "cali-test": cmd_cali_test,
         "status": cmd_status,
     }
     if cmd not in table:
