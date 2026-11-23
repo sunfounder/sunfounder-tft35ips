@@ -9,6 +9,8 @@ import sys, subprocess, threading, time
 import colorsys
 import gi
 gi.require_version("Gtk", "3.0")
+gi.require_version("Pango", "1.0")
+gi.require_version("PangoCairo", "1.0")
 from gi.repository import Gtk, Gdk, GLib, Pango, PangoCairo
 import evdev
 from evdev import ecodes
@@ -17,7 +19,7 @@ DEVICE_NAME = "ADS7846 Touchscreen"
 HELPER = ["sudo", "-n", "/usr/local/sbin/apply-touch-calibration"]
 MARGIN = 0.12
 TAPS = 1
-NAMES = ["左上角", "右上角", "左下角", "右下角"]
+NAMES = ["TOP-LEFT", "TOP-RIGHT", "BOTTOM-LEFT", "BOTTOM-RIGHT"]
 DEBOUNCE = 0.25
 
 
@@ -53,35 +55,42 @@ class Calibrator(Gtk.Window):
 
         overlay = Gtk.Overlay()
         overlay.add(self.area)
-        top = Gtk.Box()
-        top.set_halign(Gtk.Align.END)
-        top.set_valign(Gtk.Align.START)
-        self.btn_close = Gtk.Button(label="×")
-        self.btn_close.set_relief(Gtk.ReliefStyle.NONE)
-        self.btn_close.connect("clicked", lambda b: Gtk.main_quit())
-        top.pack_start(self.btn_close, False, False, 0)
-        overlay.add_overlay(top)
         self.box.pack_start(overlay, True, True, 0)
 
         self.btnbox = Gtk.Box(spacing=10)
         self.btnbox.set_border_width(6)
-        self.btn_retry = Gtk.Button(label="重试")
-        self.btn_exit = Gtk.Button(label="退出")
-        self.btn_clear = Gtk.Button(label="清屏")
-        self.btn_recal = Gtk.Button(label="重新校准")
-        self.btn_done = Gtk.Button(label="完成")
+        self.btn_retry = Gtk.Button(label="RETRY")
+        self.btn_exit = Gtk.Button(label="EXIT")
+        self.btn_clear = Gtk.Button(label="Clear")
+        self.btn_recal = Gtk.Button(label="Recalibrate")
+        self.btn_done = Gtk.Button(label="Done")
         self.btn_retry.connect("clicked", lambda b: self.retry())
         self.btn_exit.connect("clicked", lambda b: Gtk.main_quit())
         self.btn_clear.connect("clicked", lambda b: self.clear_strokes())
         self.btn_recal.connect("clicked", lambda b: self.retry())
+        self.btn_done.get_style_context().add_class("primary")
         self.btn_done.connect("clicked", lambda b: Gtk.main_quit())
         for b in (self.btn_retry, self.btn_exit, self.btn_clear, self.btn_recal, self.btn_done):
             self.btnbox.pack_start(b, True, True, 0)
-        self.box.pack_start(self.btnbox, False, False, 0)
+        # the buttons float over the drawing area: the touch keeps working
+        # underneath them, so a stroke can start or end anywhere on the panel
+        self.btnbox.set_halign(Gtk.Align.FILL)
+        self.btnbox.set_valign(Gtk.Align.END)
+        overlay.add_overlay(self.btnbox)
         self.add(self.box)
 
         css = Gtk.CssProvider()
-        css.load_from_data(b"button { font-size: 15px; padding: 5px 8px; }")
+        css.load_from_data(b"""
+window, .background { background-color: #0a0f1e; }
+box { background-color: transparent; }
+button { font-size: 14px; padding: 9px 10px; border-radius: 10px;
+         background-image: none; background-color: #141c30; color: #cdd6e4;
+         border: 1px solid #2b3550; box-shadow: none; text-shadow: none; }
+button:hover { background-color: #1b2540; }
+button:active { background-color: #223055; }
+button.primary { background-color: #ffc53d; color: #1a1200;
+                 border-color: #ffc53d; font-weight: 700; }
+""")
         Gtk.StyleContext.add_provider_for_screen(
             Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
@@ -104,7 +113,7 @@ class Calibrator(Gtk.Window):
         self.M = None
         self.last_ts = 0.0
         self.hb = 0
-        self.message = "点一下黄色十字"
+        self.message = "TAP THE YELLOW CROSS"
         self.sub = NAMES[0]
         if hasattr(self, "btnbox"):
             self.btnbox.hide()
@@ -173,11 +182,19 @@ class Calibrator(Gtk.Window):
             cr.stroke()
             cr.move_to(x - 28, y); cr.line_to(x + 28, y); cr.stroke()
             cr.move_to(x, y - 28); cr.line_to(x, y + 28); cr.stroke()
+        # progress: one bar per target
+        bw, gap = 26, 8
+        x0 = (w - (4 * bw + 3 * gap)) / 2
+        for i in range(4):
+            done = (i <= self.idx) and not self.done
+            cr.set_source_rgb(*(self.AMBER if done else (0.169, 0.208, 0.314)))
+            cr.rectangle(x0 + i * (bw + gap), 30, bw, 4)
+            cr.fill()
+
         if TAPS > 1:
-            x, y = self.targets(w, h)[min(self.idx, 3)]
-            self.text(cr, "%d/%d" % (self.tap_n + 1, TAPS), 11, y + 34, self.MUTED, w=w)
-        self.text(cr, "第 %d 个点 · 共 4 个" % min(self.idx + 1, 4), 11, h / 2 - 34, self.MUTED, w=w)
-        self.text(cr, self.message, 21, h / 2 - 4, (1, 1, 1), bold=True, w=w)
+            tx, ty = self.targets(w, h)[min(self.idx, 3)]
+            self.text(cr, "%d/%d" % (self.tap_n + 1, TAPS), 11, ty + 34, self.MUTED, w=w)
+        self.text(cr, self.message, 20, h / 2 - 10, (1, 1, 1), bold=True, w=w)
         self.text(cr, self.sub, 12, h - 26, self.MUTED, w=w)
         return False
 
@@ -195,44 +212,48 @@ class Calibrator(Gtk.Window):
                 cr.line_to(s[i][0], s[i][1])
                 cr.stroke()
                 n += 1
-        self.text(cr, "校准完成", 17, 14, (1, 1, 1), bold=True, w=w)
-        self.text(cr, "可以画画测试", 11, 40, self.MUTED, w=w)
+        self.text(cr, "CALIBRATION DONE", 17, 12, (1, 1, 1), bold=True, w=w)
+        self.text(cr, "DRAW TO TEST THE TOUCH", 11, 36, self.MUTED, w=w)
         return False
     def read_loop(self):
-        x = y = None
-        pending = False
-        down = False
-        for ev in self.dev.read_loop():
-            if ev.type == ecodes.EV_SYN:
-                # during a drag only SYN_REPORT arrives: record the point so the
-                # test canvas follows the finger
-                if self.mode == "test" and down and x is not None and y is not None:
-                    GLib.idle_add(self.add_point, x, y)
-            elif ev.type == ecodes.EV_ABS:
-                if ev.code == ecodes.ABS_X:
-                    x = ev.value
-                elif ev.code == ecodes.ABS_Y:
-                    y = ev.value
-                # a press that arrived before the coordinates: take the point
-                # as soon as this contact has both ABS values
-                if pending and x is not None and y is not None:
-                    pending = False
-                    GLib.idle_add(self.add_point, x, y)
-            elif ev.type == ecodes.EV_KEY and ev.code == ecodes.BTN_TOUCH:
-                down = ev.value == 1
-                if ev.value == 0:
-                    # pen up: drop the coordinates so the next press can only
-                    # use the ABS values that belong to its own contact
-                    pending = False
-                    x = y = None
-                    GLib.idle_add(self.end_stroke)
-                elif x is not None and y is not None:
-                    GLib.idle_add(self.add_point, x, y)
-                else:
-                    # pen down reported before the coordinates (ADS7846 can do
-                    # this on the first sample); wait for the ABS pair
-                    pending = True
-
+        # Applying the calibration rebinds the SPI device, so the event node
+        # disappears for a moment; reopen it and keep reading.
+        while True:
+            x = y = None
+            pending = down = False
+            try:
+                for ev in self.dev.read_loop():
+                    if ev.type == ecodes.EV_SYN:
+                        # during a drag only SYN_REPORT arrives: record the
+                        # point so the test canvas follows the finger
+                        if self.mode == "test" and down and x is not None and y is not None:
+                            print("DBG syn raw=%s,%s" % (x, y), file=sys.stderr, flush=True)
+                            GLib.idle_add(self.add_point, x, y)
+                    elif ev.type == ecodes.EV_ABS:
+                        if ev.code == ecodes.ABS_X:
+                            x = ev.value
+                        elif ev.code == ecodes.ABS_Y:
+                            y = ev.value
+                        if pending and x is not None and y is not None:
+                            pending = False
+                            GLib.idle_add(self.add_point, x, y)
+                    elif ev.type == ecodes.EV_KEY and ev.code == ecodes.BTN_TOUCH:
+                        down = ev.value == 1
+                        if ev.value == 0:
+                            pending = False
+                            x = y = None
+                            GLib.idle_add(self.end_stroke)
+                        elif x is not None and y is not None:
+                            GLib.idle_add(self.add_point, x, y)
+                        else:
+                            pending = True
+            except OSError:
+                print("DBG device lost, reopening", file=sys.stderr, flush=True)
+                time.sleep(0.5)
+                dev = find_device()
+                if dev is not None:
+                    self.dev = dev
+                    self.cur = None
     def end_stroke(self):
         self.cur = None
         return False
@@ -252,6 +273,8 @@ class Calibrator(Gtk.Window):
             self.strokes.append(self.cur)
         else:
             self.cur.append((x, y))
+        print("DBG point=%.1f,%.1f strokes=%d" % (x, y, len(self.strokes)),
+              file=sys.stderr, flush=True)
         self.queue_draw()
 
     def add_point(self, rx, ry):
@@ -270,7 +293,7 @@ class Calibrator(Gtk.Window):
         if self.tap_n == 0 and self.points:
             pu, pv, _, _ = self.points[-1]
             if abs(u - pu) < 0.05 and abs(v - pv) < 0.05:
-                self.message = "还是同一个位置，请点黄色十字"
+                self.message = "SAME SPOT - TAP THE YELLOW CROSS"
                 self.sub = "move to " + NAMES[self.idx]
                 self.queue_draw()
                 return False
@@ -279,7 +302,7 @@ class Calibrator(Gtk.Window):
         print("POINT %d tap %d raw=%d,%d norm=%.4f,%.4f" % (self.idx, self.tap_n, rx, ry, u, v),
               file=sys.stderr, flush=True)
         if self.tap_n < TAPS:
-            self.message = "再点一下（%d/%d）" % (self.tap_n + 1, TAPS)
+            self.message = "TAP AGAIN (%d/%d)" % (self.tap_n + 1, TAPS)
         else:
             su = sum(s[0] for s in self.samples[self.idx]) / TAPS
             sv = sum(s[1] for s in self.samples[self.idx]) / TAPS
@@ -292,7 +315,7 @@ class Calibrator(Gtk.Window):
             self.idx += 1
             self.tap_n = 0
             if self.idx < 4:
-                self.message = "好，继续点下一个黄色十字"
+                self.message = "OK - TAP THE NEXT CROSS"
                 self.sub = "next: " + NAMES[self.idx]
             else:
                 self.finish()
