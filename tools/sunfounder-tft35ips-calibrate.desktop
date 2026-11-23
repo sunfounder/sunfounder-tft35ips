@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=SunFounder TFT 3.5" first-time calibration
+Comment=Open the touch calibration once after the driver was installed
+Exec=/usr/local/bin/sf-tft-calibrate-once
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

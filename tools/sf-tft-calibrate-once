@@ -1,0 +1,17 @@
+#!/bin/sh
+# Run the touch calibration once after the first boot that follows an install.
+#
+# The installer writes /var/lib/sunfounder-tft35ips/calibrate-once; this script
+# starts the calibration UI when the flag exists and no matrix has been saved
+# yet, then clears the flag.
+FLAG=/var/lib/sunfounder-tft35ips/calibrate-once
+RULES=/etc/udev/rules.d/99-ads7846-calibration.rules
+
+[ -f "$FLAG" ] || exit 0
+
+if [ -f "$RULES" ]; then
+    rm -f "$FLAG"
+    exit 0
+fi
+
+exec /usr/local/bin/touch-calibrate
