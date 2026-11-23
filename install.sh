@@ -125,6 +125,13 @@ else
     fi
 fi
 
+if command -v update-initramfs >/dev/null 2>&1; then
+    # some distros ship the module inside the initramfs; without this the old
+    # copy keeps loading after an upgrade
+    update-initramfs -u -k all >/dev/null 2>&1 || warn "update-initramfs failed"
+    ok "initramfs updated"
+fi
+
 OVL_ASSET="sunfounder-tft35ips-${KVER}-${ARCH}.dtbo"
 if ! curl -fsSL --retry 2 -o "/tmp/$OVL_ASSET" "$RELEASE_URL/$OVL_ASSET"; then
     dtc -@ -I dts -O dtb -o "/tmp/$OVL_ASSET" "$SRC/driver/sunfounder-tft35ips-overlay.dts" \
@@ -147,6 +154,16 @@ install -m 755 "$SRC/tools/sf-tft-x11-mode" /usr/local/bin/sf-tft-x11-mode
 mkdir -p /etc/xdg/autostart
 install -m 644 "$SRC/tools/sunfounder-tft35ips-x11.desktop" \
     /etc/xdg/autostart/sunfounder-tft35ips-x11.desktop
+
+# X11-only desktops (Kali and friends) need the fbdev driver: the modesetting
+# driver flips without damage and the panel would freeze on the first frame.
+if [ -d /etc/X11 ] && [ -d /usr/share/xsessions ] && \
+   [ ! -d /usr/share/wayland-sessions ]; then
+    mkdir -p /etc/X11/xorg.conf.d
+    install -m 644 "$SRC/tools/20-sunfounder-tft-x11.conf" \
+        /etc/X11/xorg.conf.d/20-sunfounder-tft-x11.conf
+    ok "X11 fallback installed (fbdev, single display)"
+fi
 ok "sf-tft and touch-calibrate installed"
 
 if grep -q '^dtoverlay=sunfounder-tft35ips' "$CONFIG_TXT"; then

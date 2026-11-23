@@ -16,7 +16,11 @@
 #include <video/mipi_display.h>
 
 #include <drm/drm_atomic_helper.h>
+#include <drm/drm_damage_helper.h>
 #include <drm/drm_drv.h>
+#include <drm/drm_format_helper.h>
+#include <drm/drm_framebuffer.h>
+#include <video/mipi_display.h>
 #if defined(__has_include)
 # if __has_include(<drm/clients/drm_client_setup.h>)
 #  include <drm/clients/drm_client_setup.h>
@@ -316,8 +320,89 @@ static void waveshare_enable(struct drm_simple_display_pipe *pipe,
 	drm_dev_exit(idx);
 }
 
+static void waveshare_set_window(struct mipi_dbi_dev *dbidev,
+				 unsigned int xs, unsigned int xe,
+				 unsigned int ys, unsigned int ye)
+{
+	struct mipi_dbi *dbi = &dbidev->dbi;
+
+	mipi_dbi_command(dbi, MIPI_DCS_SET_COLUMN_ADDRESS,
+			 (xs >> 8) & 0xff, xs & 0xff, (xe >> 8) & 0xff, xe & 0xff);
+	mipi_dbi_command(dbi, MIPI_DCS_SET_PAGE_ADDRESS,
+			 (ys >> 8) & 0xff, ys & 0xff, (ye >> 8) & 0xff, ye & 0xff);
+}
+
+static void waveshare_flush(struct mipi_dbi_dev *dbidev,
+			    struct drm_plane_state *state, struct drm_rect *rect)
+{
+	struct drm_shadow_plane_state *shadow = to_drm_shadow_plane_state(state);
+	struct drm_framebuffer *fb = state->fb;
+	struct mipi_dbi *dbi = &dbidev->dbi;
+	const struct drm_format_info *dst_format;
+	unsigned int width = drm_rect_width(rect);
+	unsigned int height = drm_rect_height(rect);
+	bool swap = dbi->swap_bytes;
+	bool full = width == fb->width && height == fb->height;
+	size_t len;
+	void *tr;
+	int ret;
+
+	if (!dbi->dc || !full || swap ||
+	    fb->format->format == DRM_FORMAT_XRGB8888) {
+		tr = dbidev->tx_buf;
+		ret = mipi_dbi_buf_copy(tr, &shadow->data[0], fb, rect, swap,
+					&shadow->fmtcnv_state);
+		if (ret)
+			return;
+	} else {
+		tr = shadow->data[0].vaddr;
+	}
+
+	waveshare_set_window(dbidev, rect->x1, rect->x2 - 1, rect->y1, rect->y2 - 1);
+
+	if (fb->format->format == DRM_FORMAT_XRGB8888)
+		dst_format = drm_format_info(dbidev->pixel_format);
+	else
+		dst_format = fb->format;
+	len = drm_format_info_min_pitch(dst_format, 0, width) * height;
+
+	mipi_dbi_command_buf(dbi, MIPI_DCS_WRITE_MEMORY_START, tr, len);
+}
+
+static void waveshare_update(struct drm_simple_display_pipe *pipe,
+			     struct drm_plane_state *old_state)
+{
+	struct mipi_dbi_dev *dbidev = drm_to_mipi_dbi_dev(pipe->crtc.dev);
+	struct drm_plane_state *state = pipe->plane.state;
+	struct drm_rect rect;
+	int idx;
+
+	if (!pipe->crtc.state->active || !state->fb)
+		return;
+	if (!drm_dev_enter(&dbidev->drm, &idx))
+		return;
+
+	if (drm_atomic_helper_damage_merged(old_state, state, &rect)) {
+		waveshare_flush(dbidev, state, &rect);
+	} else {
+		/*
+		 * Some user space (X11 with the modesetting driver) flips the
+		 * framebuffer without reporting damage; push the whole frame
+		 * so the panel does not stay on the first image.
+		 */
+		rect.x1 = 0;
+		rect.y1 = 0;
+		rect.x2 = state->fb->width;
+		rect.y2 = state->fb->height;
+		waveshare_flush(dbidev, state, &rect);
+	}
+
+	drm_dev_exit(idx);
+}
+
 static const struct drm_simple_display_pipe_funcs waveshare_pipe_funcs = {
 	DRM_MIPI_DBI_SIMPLE_DISPLAY_PIPE_FUNCS(waveshare_enable),
+	.update = waveshare_update,
 };
 
 static const struct drm_display_mode waveshare_mode = {
