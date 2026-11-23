@@ -15,6 +15,7 @@
 
 #include <video/mipi_display.h>
 
+#include <linux/version.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_damage_helper.h>
 #include <drm/drm_drv.h>
@@ -320,6 +321,7 @@ static void waveshare_enable(struct drm_simple_display_pipe *pipe,
 	drm_dev_exit(idx);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)
 static void waveshare_set_window(struct mipi_dbi_dev *dbidev,
 				 unsigned int xs, unsigned int xe,
 				 unsigned int ys, unsigned int ye)
@@ -400,9 +402,13 @@ static void waveshare_update(struct drm_simple_display_pipe *pipe,
 	drm_dev_exit(idx);
 }
 
+#endif /* LINUX_VERSION_CODE >= 6.11 */
+
 static const struct drm_simple_display_pipe_funcs waveshare_pipe_funcs = {
 	DRM_MIPI_DBI_SIMPLE_DISPLAY_PIPE_FUNCS(waveshare_enable),
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)
 	.update = waveshare_update,
+#endif
 };
 
 static const struct drm_display_mode waveshare_mode = {
