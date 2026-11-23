@@ -23,6 +23,31 @@ on Raspberry Pi 4 / 5.
 - Raspberry Pi 4 / 5
 - Raspberry Pi OS Bullseye (kernel 6.1), Bookworm (6.6), Trixie (6.18)
 - Debian 64-bit
+- Kali (X11) with the fbdev fallback described below
+
+## X11 desktops (Kali and friends)
+
+On Wayland the driver runs through KMS and every compositor frame reaches the
+panel. X11's `modesetting` driver flips the framebuffer **without reporting
+damage**, so the panel keeps showing the first frame and looks frozen.
+
+The installer therefore adds an fbdev Xorg config on systems that only have an
+X11 session:
+
+```
+/etc/X11/xorg.conf.d/20-sunfounder-tft-x11.conf
+-> Option "fbdev" "/dev/fbN"   (the framebuffer that belongs to the panel)
+```
+
+fbdev drives a single framebuffer, so **multi-monitor (HDMI + panel) is not
+available** on X11; use Wayland for that. If the distribution also ships an
+OutputClass that forces the modesetting driver, move it aside as well — Kali
+does:
+
+```bash
+sudo mv /etc/X11/xorg.conf.d/99-vc4.conf /etc/X11/xorg.conf.d/99-vc4.conf.disabled
+sudo systemctl restart lightdm
+```
 
 ## Install
 
