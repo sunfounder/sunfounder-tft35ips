@@ -26,4 +26,16 @@ SUBSYSTEM=="input", ENV{ID_INPUT_TOUCHSCREEN}=="1", ATTRS{name}=="ADS7846 Touchs
 EOF
 udevadm control --reload-rules
 udevadm trigger --subsystem-match=input
+
+# Let the running compositor pick the new matrix up without a reboot: rebinding
+# the SPI device makes the input device reappear, and libinput reads the udev
+# property again when it opens it.
+for d in /sys/bus/spi/drivers/ads7846/spi*; do
+    [ -e "$d" ] || continue
+    dev=$(basename "$d")
+    echo "$dev" > /sys/bus/spi/drivers/ads7846/unbind 2>/dev/null || continue
+    sleep 0.3
+    echo "$dev" > /sys/bus/spi/drivers/ads7846/bind 2>/dev/null || true
+done
+
 echo "installed: $MATRIX"

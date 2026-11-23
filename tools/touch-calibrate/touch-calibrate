@@ -3,7 +3,7 @@
 
 One tap per target (4 taps total). The same-spot guard rejects a second tap on
 the previous cross, so a stray double-tap cannot shift the next point.
-After saving, two buttons: REBOOT & APPLY / EXIT.
+After saving: DONE (the matrix is applied without a reboot).
 """
 import sys, subprocess, threading, time
 import gi
@@ -54,7 +54,7 @@ class Calibrator(Gtk.Window):
         self.btnbox = Gtk.Box(spacing=10)
         self.btnbox.set_border_width(6)
         self.btn_retry = Gtk.Button(label="RETRY")
-        self.btn_reboot = Gtk.Button(label="REBOOT & APPLY")
+        self.btn_reboot = Gtk.Button(label="DONE")
         self.btn_exit = Gtk.Button(label="EXIT")
         self.btn_retry.connect("clicked", lambda b: self.retry())
         self.btn_reboot.connect("clicked", self.on_reboot)
@@ -242,7 +242,7 @@ class Calibrator(Gtk.Window):
         r = subprocess.run(HELPER + [self.matrix], capture_output=True, text=True)
         if r.returncode == 0:
             self.message = "CALIBRATION SAVED"
-            self.sub = "reboot to apply, or exit"
+            self.sub = "applied - you can close this window"
             self.done = True
             self.show_buttons(ok=True)
         else:
