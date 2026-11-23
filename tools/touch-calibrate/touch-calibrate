@@ -7,6 +7,7 @@ After saving: DONE (the matrix is applied without a reboot).
 """
 import sys, subprocess, threading, time
 import colorsys
+import re
 import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("Pango", "1.0")
@@ -17,6 +18,7 @@ from evdev import ecodes
 
 DEVICE_NAME = "ADS7846 Touchscreen"
 HELPER = ["sudo", "-n", "/usr/local/sbin/apply-touch-calibration"]
+RULES_FILE = "/etc/udev/rules.d/99-ads7846-calibration.rules"
 MARGIN = 0.12
 TAPS = 1
 NAMES = ["TOP-LEFT", "TOP-RIGHT", "BOTTOM-LEFT", "BOTTOM-RIGHT"]
@@ -101,6 +103,21 @@ button.primary { background-color: #ffc53d; color: #1a1200;
         threading.Thread(target=self.read_loop, daemon=True).start()
         GLib.timeout_add(1000, self.heartbeat)
 
+    def start_test(self):
+        m = load_matrix()
+        if m is None:
+            self.standalone = False
+            return False
+        self.M = m
+        self.mode = "test"
+        self.standalone = True
+        self.strokes = []
+        self.cur = None
+        self.done = True
+        self.show_buttons(ok=True)
+        self.queue_draw()
+        return True
+
     def reset(self):
         self.samples = [[] for _ in range(4)]
         self.points = []
@@ -108,6 +125,7 @@ button.primary { background-color: #ffc53d; color: #1a1200;
         self.tap_n = 0
         self.done = False
         self.mode = "calib"
+        self.standalone = False
         self.strokes = []
         self.cur = None
         self.M = None
@@ -212,7 +230,8 @@ button.primary { background-color: #ffc53d; color: #1a1200;
                 cr.line_to(s[i][0], s[i][1])
                 cr.stroke()
                 n += 1
-        self.text(cr, "CALIBRATION DONE", 17, 12, (1, 1, 1), bold=True, w=w)
+        title = "CALIBRATION TEST" if getattr(self, "standalone", False) else "CALIBRATION DONE"
+        self.text(cr, title, 17, 12, (1, 1, 1), bold=True, w=w)
         self.text(cr, "DRAW TO TEST THE TOUCH", 11, 36, self.MUTED, w=w)
         return False
     def read_loop(self):
@@ -343,6 +362,7 @@ button.primary { background-color: #ffc53d; color: #1a1200;
         if r.returncode == 0:
             self.M = (a, b, c, d, e, f)
             self.mode = "test"
+            self.standalone = False
             self.strokes = []
             self.cur = None
             self.message = "CALIBRATION SAVED"
@@ -378,6 +398,21 @@ button.primary { background-color: #ffc53d; color: #1a1200;
             Gtk.main_quit()
 
 
+def load_matrix():
+    """Return the calibration matrix saved in the udev rule, or None."""
+    try:
+        with open(RULES_FILE, encoding="utf-8") as f:
+            text = f.read()
+        m = re.search(r'LIBINPUT_CALIBRATION_MATRIX="([^"]+)"', text)
+        if m:
+            v = [float(x) for x in m.group(1).split()]
+            if len(v) >= 6:
+                return tuple(v[:6])
+    except Exception:
+        pass
+    return None
+
+
 def find_device():
     for p in evdev.list_devices():
         d = evdev.InputDevice(p)
@@ -387,6 +422,7 @@ def find_device():
 
 
 def main():
+    start_in_test = "--test" in sys.argv
     if "--reset" in sys.argv:
         r = subprocess.run(HELPER + ["--reset"], capture_output=True, text=True)
         print(r.stdout or r.stderr)
@@ -396,6 +432,8 @@ def main():
         print("touch device not found: " + DEVICE_NAME, file=sys.stderr)
         sys.exit(1)
     win = Calibrator(dev)
+    if start_in_test:
+        GLib.idle_add(win.start_test)
     win.connect("destroy", Gtk.main_quit)
     Gtk.main()
 
