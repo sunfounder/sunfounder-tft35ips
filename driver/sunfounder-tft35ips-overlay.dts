@@ -99,7 +99,7 @@
 	};
 	__overrides__ {
 		speed =		<&sunfounder_tft35ips>,"spi-max-frequency:0";
-		rotate =	<&sunfounder_tft35ips>,"rotation:180";
+		rotate =	<&sunfounder_tft35ips>,"rotation";
 		bgr = 		<&sunfounder_tft35ips>,"bgr=0";
                 color_invert=   <&sunfounder_tft35ips>,"color_invert!";
 		xohms =		<&sunfounder_tft35ips_ts>,"ti,x-plate-ohms;0";
