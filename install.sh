@@ -151,9 +151,21 @@ visudo -cf /etc/sudoers.d/touch-calibrate >/dev/null
 install -m 644 "$SRC/tools/touch-calibrate/touch-calibrate.desktop" \
     /usr/share/applications/touch-calibrate.desktop
 install -m 755 "$SRC/tools/sf-tft-x11-mode" /usr/local/bin/sf-tft-x11-mode
+install -m 755 "$SRC/tools/sf-tft-calibrate-once" /usr/local/bin/sf-tft-calibrate-once
 mkdir -p /etc/xdg/autostart
 install -m 644 "$SRC/tools/sunfounder-tft35ips-x11.desktop" \
     /etc/xdg/autostart/sunfounder-tft35ips-x11.desktop
+install -m 644 "$SRC/tools/sunfounder-tft35ips-calibrate.desktop" \
+    /etc/xdg/autostart/sunfounder-tft35ips-calibrate.desktop
+
+# the driver only works after a reboot, so ask for the calibration on the first
+# desktop start instead of making the user run it by hand
+mkdir -p /var/lib/sunfounder-tft35ips
+if [ -f /etc/udev/rules.d/99-ads7846-calibration.rules ]; then
+    rm -f /var/lib/sunfounder-tft35ips/calibrate-once
+else
+    touch /var/lib/sunfounder-tft35ips/calibrate-once
+fi
 
 # X11-only desktops (Kali and friends) need the fbdev driver: the modesetting
 # driver flips without damage and the panel would freeze on the first frame.
