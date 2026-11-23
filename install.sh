@@ -68,10 +68,21 @@ for p in /boot/firmware/config.txt /boot/config.txt; do
 done
 [ -z "$CONFIG_TXT" ] && die "config.txt not found"
 
+# Ubuntu keeps the firmware files under /boot/firmware/<os_prefix>/, so honour
+# the os_prefix set in config.txt before falling back to the usual paths
+OS_PREFIX=""
+if [ -n "$CONFIG_TXT" ]; then
+    OS_PREFIX=$(sed -n 's/^[[:space:]]*os_prefix=\([^[:space:]]*\).*/\1/p' "$CONFIG_TXT" | tail -1)
+fi
+BASE_DIR=/boot/firmware
+[ -d "$BASE_DIR" ] || BASE_DIR=/boot
 OVERLAY_DIR=""
-for p in /boot/firmware/overlays /boot/overlays; do
+for p in "$BASE_DIR/${OS_PREFIX}overlays" "$BASE_DIR/overlays" /boot/overlays; do
     if [ -d "$p" ]; then OVERLAY_DIR="$p"; break; fi
 done
+if [ -z "$OVERLAY_DIR" ]; then
+    mkdir -p "$BASE_DIR/${OS_PREFIX}overlays" 2>/dev/null && OVERLAY_DIR="$BASE_DIR/${OS_PREFIX}overlays"
+fi
 [ -z "$OVERLAY_DIR" ] && die "overlay directory not found"
 
 log "1/4 Install dependencies"
