@@ -1,17 +1,13 @@
 #!/bin/sh
-# Run the touch calibration once after the first boot that follows an install.
+# Offer the touch calibration on every desktop login until a matrix is saved.
 #
-# The installer writes /var/lib/sunfounder-tft35ips/calibrate-once; this script
-# starts the calibration UI when the flag exists and no matrix has been saved
-# yet, then clears the flag.
-FLAG=/var/lib/sunfounder-tft35ips/calibrate-once
+# Runs from /etc/xdg/autostart after the desktop is up, which is the first
+# moment the driver and the touch device exist (the overlay is applied at boot).
 RULES=/etc/udev/rules.d/99-ads7846-calibration.rules
 
-[ -f "$FLAG" ] || exit 0
+[ -f "$RULES" ] && exit 0
 
-if [ -f "$RULES" ]; then
-    rm -f "$FLAG"
-    exit 0
-fi
+# only when the panel driver is actually there
+[ -e /sys/class/drm/card*-SPI-1 ] || exit 0
 
 exec /usr/local/bin/touch-calibrate

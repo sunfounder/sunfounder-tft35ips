@@ -158,14 +158,8 @@ install -m 644 "$SRC/tools/sunfounder-tft35ips-x11.desktop" \
 install -m 644 "$SRC/tools/sunfounder-tft35ips-calibrate.desktop" \
     /etc/xdg/autostart/sunfounder-tft35ips-calibrate.desktop
 
-# the driver only works after a reboot, so ask for the calibration on the first
-# desktop start instead of making the user run it by hand
-mkdir -p /var/lib/sunfounder-tft35ips
-if [ -f /etc/udev/rules.d/99-ads7846-calibration.rules ]; then
-    rm -f /var/lib/sunfounder-tft35ips/calibrate-once
-else
-    touch /var/lib/sunfounder-tft35ips/calibrate-once
-fi
+# the driver only works after a reboot, so the calibration is offered by the
+# autostart helper on the first desktop login (it stops once a matrix exists)
 
 # X11-only desktops (Kali and friends) need the fbdev driver: the modesetting
 # driver flips without damage and the panel would freeze on the first frame.
