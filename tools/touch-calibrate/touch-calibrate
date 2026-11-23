@@ -126,6 +126,7 @@ button.primary { background-color: #ffc53d; color: #1a1200;
         self.done = False
         self.mode = "calib"
         self.standalone = False
+        self.saving = False
         self.flash = {}
         self.anim = None
         self.strokes = []
@@ -324,6 +325,8 @@ button.primary { background-color: #ffc53d; color: #1a1200;
         self.queue_draw()
 
     def add_point(self, rx, ry):
+        if self.saving:
+            return False
         if self.mode == "test":
             self.add_test_point(rx, ry)
             return False
@@ -365,11 +368,16 @@ button.primary { background-color: #ffc53d; color: #1a1200;
                 self.message = "OK - TAP THE NEXT CROSS"
                 self.sub = "next: " + NAMES[self.idx]
             else:
-                self.finish()
+                # let the last green pulse play before switching to the test
+                self.saving = True
+                self.message = "SAVING..."
+                self.sub = ""
+                GLib.timeout_add(500, self.finish)
         self.queue_draw()
         return False
 
     def finish(self):
+        self.saving = False
         A, bs, bt = [], [], []
         for u, v, s, t in self.points:
             A.append((u, v, 1.0)); bs.append(s); bt.append(t)
@@ -401,9 +409,15 @@ button.primary { background-color: #ffc53d; color: #1a1200;
             self.sub = "calibration applied - draw on the screen to test it"
             self.done = True
             self.show_buttons(ok=True)
+            self.btnbox.set_sensitive(False)
+            GLib.timeout_add(800, self.enable_buttons)
         else:
             self.fail("SAVE FAILED")
         self.queue_draw()
+
+    def enable_buttons(self):
+        self.btnbox.set_sensitive(True)
+        return False
 
     def show_buttons(self, ok):
         self.btnbox.show_all()
