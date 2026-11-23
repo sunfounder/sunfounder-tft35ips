@@ -49,19 +49,33 @@ class Calibrator(Gtk.Window):
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.area = Gtk.DrawingArea()
         self.area.connect("draw", self.on_draw)
-        self.box.pack_start(self.area, True, True, 0)
+
+        overlay = Gtk.Overlay()
+        overlay.add(self.area)
+        top = Gtk.Box()
+        top.set_halign(Gtk.Align.END)
+        top.set_valign(Gtk.Align.START)
+        self.btn_close = Gtk.Button(label="×")
+        self.btn_close.set_relief(Gtk.ReliefStyle.NONE)
+        self.btn_close.connect("clicked", lambda b: Gtk.main_quit())
+        top.pack_start(self.btn_close, False, False, 0)
+        overlay.add_overlay(top)
+        self.box.pack_start(overlay, True, True, 0)
 
         self.btnbox = Gtk.Box(spacing=10)
         self.btnbox.set_border_width(6)
         self.btn_retry = Gtk.Button(label="RETRY")
-        self.btn_reboot = Gtk.Button(label="DONE")
         self.btn_exit = Gtk.Button(label="EXIT")
+        self.btn_clear = Gtk.Button(label="清屏")
+        self.btn_recal = Gtk.Button(label="重新校准")
+        self.btn_done = Gtk.Button(label="完成")
         self.btn_retry.connect("clicked", lambda b: self.retry())
-        self.btn_reboot.connect("clicked", self.on_reboot)
         self.btn_exit.connect("clicked", lambda b: Gtk.main_quit())
-        self.btnbox.pack_start(self.btn_retry, True, True, 0)
-        self.btnbox.pack_start(self.btn_reboot, True, True, 0)
-        self.btnbox.pack_start(self.btn_exit, True, True, 0)
+        self.btn_clear.connect("clicked", lambda b: self.clear_strokes())
+        self.btn_recal.connect("clicked", lambda b: self.retry())
+        self.btn_done.connect("clicked", lambda b: Gtk.main_quit())
+        for b in (self.btn_retry, self.btn_exit, self.btn_clear, self.btn_recal, self.btn_done):
+            self.btnbox.pack_start(b, True, True, 0)
         self.box.pack_start(self.btnbox, False, False, 0)
         self.add(self.box)
 
@@ -83,12 +97,27 @@ class Calibrator(Gtk.Window):
         self.idx = 0
         self.tap_n = 0
         self.done = False
+        self.mode = "calib"
+        self.strokes = []
+        self.cur = None
+        self.M = None
         self.last_ts = 0.0
         self.hb = 0
         self.message = "TAP THE YELLOW CROSS"
         self.sub = NAMES[0]
         if hasattr(self, "btnbox"):
             self.btnbox.hide()
+
+    def clear_strokes(self):
+        self.strokes = []
+        self.cur = None
+        self.queue_draw()
+
+    def retry(self):
+        self.reset()
+        self.show_all()
+        self.btnbox.hide()
+        self.queue_draw()
 
     def heartbeat(self):
         self.hb += 1
@@ -107,6 +136,8 @@ class Calibrator(Gtk.Window):
         bg = [(0.08, 0.09, 0.18), (0.06, 0.16, 0.10), (0.18, 0.10, 0.06), (0.12, 0.12, 0.12)][min(self.idx, 3)]
         cr.set_source_rgb(*bg)
         cr.paint()
+        if self.mode == "test":
+            return self.draw_test(w, h, cr)
         for i, (x, y) in enumerate(self.targets(w, h)):
             if i < self.idx:
                 col = (0.3, 0.9, 0.3)
@@ -149,6 +180,29 @@ class Calibrator(Gtk.Window):
         cr.show_text("hb%d" % self.hb)
         return False
 
+    def draw_test(self, w, h, cr):
+        cr.set_line_width(3)
+        cr.set_source_rgb(0.2, 0.9, 1.0)
+        for s in self.strokes:
+            if len(s) < 2:
+                continue
+            cr.move_to(s[0][0], s[0][1])
+            for x, y in s[1:]:
+                cr.line_to(x, y)
+            cr.stroke()
+        cr.set_source_rgb(1, 1, 1)
+        cr.select_font_face("Sans", 0, 1)
+        cr.set_font_size(15)
+        ext = cr.text_extents("DRAW TO TEST THE TOUCH")
+        cr.move_to((w - ext.width) / 2, 22)
+        cr.show_text("DRAW TO TEST THE TOUCH")
+        cr.set_font_size(11)
+        cr.set_source_rgb(0.7, 0.75, 0.8)
+        ext = cr.text_extents(self.sub)
+        cr.move_to((w - ext.width) / 2, h - 8)
+        cr.show_text(self.sub)
+        return False
+
     def read_loop(self):
         x = y = None
         pending = False
@@ -169,6 +223,7 @@ class Calibrator(Gtk.Window):
                     # use the ABS values that belong to its own contact
                     pending = False
                     x = y = None
+                    GLib.idle_add(self.end_stroke)
                 elif x is not None and y is not None:
                     GLib.idle_add(self.add_point, x, y)
                 else:
@@ -176,7 +231,31 @@ class Calibrator(Gtk.Window):
                     # this on the first sample); wait for the ABS pair
                     pending = True
 
+    def end_stroke(self):
+        self.cur = None
+        return False
+
+    def add_test_point(self, rx, ry):
+        if not self.M:
+            return
+        u = (rx - self.ax.min) / max(1, self.ax.max - self.ax.min)
+        v = (ry - self.ay.min) / max(1, self.ay.max - self.ay.min)
+        a, b, c, d, e, f = self.M
+        w = self.area.get_allocated_width()
+        h = self.area.get_allocated_height()
+        x = (a * u + b * v + c) * w
+        y = (d * u + e * v + f) * h
+        if self.cur is None:
+            self.cur = [(x, y)]
+            self.strokes.append(self.cur)
+        else:
+            self.cur.append((x, y))
+        self.queue_draw()
+
     def add_point(self, rx, ry):
+        if self.mode == "test":
+            self.add_test_point(rx, ry)
+            return False
         now = time.time()
         if self.done or self.idx >= 4:
             return False
@@ -241,8 +320,12 @@ class Calibrator(Gtk.Window):
         print("MATRIX " + self.matrix, file=sys.stderr, flush=True)
         r = subprocess.run(HELPER + [self.matrix], capture_output=True, text=True)
         if r.returncode == 0:
+            self.M = (a, b, c, d, e, f)
+            self.mode = "test"
+            self.strokes = []
+            self.cur = None
             self.message = "CALIBRATION SAVED"
-            self.sub = "applied - you can close this window"
+            self.sub = "calibration applied - draw on the screen to test it"
             self.done = True
             self.show_buttons(ok=True)
         else:
@@ -251,12 +334,10 @@ class Calibrator(Gtk.Window):
 
     def show_buttons(self, ok):
         self.btnbox.show_all()
-        self.btn_retry.set_visible(not ok)
-        self.btn_reboot.set_visible(ok)
-
-    def on_reboot(self, b):
-        subprocess.Popen(["sudo", "-n", "/usr/local/sbin/apply-touch-calibration", "--reboot"])
-        Gtk.main_quit()
+        for b in (self.btn_retry, self.btn_exit):
+            b.set_visible(not ok)
+        for b in (self.btn_clear, self.btn_recal, self.btn_done):
+            b.set_visible(ok)
 
     def fail(self, msg):
         print("FAIL " + msg, file=sys.stderr, flush=True)
