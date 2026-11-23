@@ -66,9 +66,9 @@ class Calibrator(Gtk.Window):
         self.btnbox.set_border_width(6)
         self.btn_retry = Gtk.Button(label="RETRY")
         self.btn_exit = Gtk.Button(label="EXIT")
-        self.btn_clear = Gtk.Button(label="清屏")
-        self.btn_recal = Gtk.Button(label="重新校准")
-        self.btn_done = Gtk.Button(label="完成")
+        self.btn_clear = Gtk.Button(label="Clear")
+        self.btn_recal = Gtk.Button(label="Recalibrate")
+        self.btn_done = Gtk.Button(label="Done")
         self.btn_retry.connect("clicked", lambda b: self.retry())
         self.btn_exit.connect("clicked", lambda b: Gtk.main_quit())
         self.btn_clear.connect("clicked", lambda b: self.clear_strokes())
@@ -174,10 +174,6 @@ class Calibrator(Gtk.Window):
         ext = cr.text_extents(self.sub)
         cr.move_to((w - ext.width) / 2, h - 8)
         cr.show_text(self.sub)
-        cr.set_font_size(9)
-        cr.set_source_rgb(0.6, 0.6, 0.6)
-        cr.move_to(4, 12)
-        cr.show_text("hb%d" % self.hb)
         return False
 
     def draw_test(self, w, h, cr):
