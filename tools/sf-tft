@@ -4,6 +4,7 @@
 Usage:
     sf-tft doctor [--fix]
     sf-tft calibrate
+    sf-tft test
     sf-tft status
 
 doctor checks the driver installation, device-tree overlay, DRM output, touch
@@ -313,6 +314,24 @@ def apply_fixes():
         say()
 
 
+def cmd_test():
+    """Open the touch test canvas without recalibrating."""
+    if not os.path.isfile(CALIBRATE_BIN):
+        say("touch-calibrate not installed; run the installer first")
+        return 1
+    user, runtime, display = wayland_env()
+    if not user:
+        say("no Wayland session found (run this on the desktop)")
+        return 1
+    if not os.path.isfile("/etc/udev/rules.d/99-ads7846-calibration.rules"):
+        say("touch is not calibrated yet; run: sf-tft calibrate")
+        return 1
+    os.execvp("runuser", ["runuser", "-u", user, "--", "env",
+                          "XDG_RUNTIME_DIR=" + runtime,
+                          "WAYLAND_DISPLAY=" + display,
+                          CALIBRATE_BIN, "--test"])
+
+
 def cmd_calibrate():
     if not os.path.isfile(CALIBRATE_BIN):
         say("touch-calibrate not installed; run the installer first")
@@ -355,6 +374,7 @@ def main():
         return cmd_doctor(fix="--fix" in args)
     table = {
         "calibrate": cmd_calibrate,
+        "test": cmd_test,
         "status": cmd_status,
     }
     if cmd not in table:
