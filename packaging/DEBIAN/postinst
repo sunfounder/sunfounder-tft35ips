@@ -41,13 +41,6 @@ configure)
         update-initramfs -u -k all >/dev/null 2>&1 || true
     fi
 
-    # ask for the calibration on the first desktop start after installing
-    mkdir -p /var/lib/sunfounder-tft35ips
-    if [ -f /etc/udev/rules.d/99-ads7846-calibration.rules ]; then
-        rm -f /var/lib/sunfounder-tft35ips/calibrate-once
-    else
-        touch /var/lib/sunfounder-tft35ips/calibrate-once
-    fi
 
     # X11-only desktops need the fbdev driver (modesetting flips without damage)
     if [ -d /etc/X11 ] && [ -d /usr/share/xsessions ] && \
