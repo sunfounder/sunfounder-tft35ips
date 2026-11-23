@@ -187,6 +187,41 @@ class Doctor:
             self.fail(msg, hint)
 
 
+def desktop_info():
+    """Return (session, desktop, x_driver) for the running graphical session."""
+    session = desktop = driver = ""
+
+    wayland = run(["sh", "-c", "pgrep -x labwc >/dev/null || pgrep -x sway >/dev/null || "
+                               "pgrep -x wayfire >/dev/null || pgrep -x weston >/dev/null || "
+                               "pgrep -x gnome-shell >/dev/null"])
+    r = run(["pgrep", "-x", "Xorg"])
+    if wayland and wayland.returncode == 0:
+        session = "Wayland"
+    elif r and r.returncode == 0:
+        session = "X11"
+
+    for proc, name in (("xfce4-session", "xfce"), ("gnome-session", "gnome"),
+                       ("lxsession", "lxde"), ("mate-session", "mate"),
+                       ("startplasma", "plasma")):
+        rr = run(["pgrep", "-f", proc])
+        if rr and rr.returncode == 0:
+            desktop = name
+            break
+
+    if session == "X11":
+        try:
+            with open("/var/log/Xorg.0.log", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            if "Falling back to old probe method for fbdev" in text:
+                driver = "fbdev"
+            elif "modesetting" in text:
+                driver = "modesetting"
+        except OSError:
+            pass
+
+    return session, desktop, driver
+
+
 def cmd_doctor(fix=False):
     if fix:
         apply_fixes()
@@ -237,6 +272,17 @@ def cmd_doctor(fix=False):
             say("         " + e[:110])
     else:
         d.ok("dmesg: no SPI/driver errors")
+
+    session, desktop, xdriver = desktop_info()
+    label = session + (" / " + desktop if desktop else "")
+    if not session:
+        d.warn("desktop: no graphical session running",
+               "start the desktop (lightdm / gdm) to use the panel")
+    elif session == "X11" and xdriver == "modesetting":
+        d.warn("desktop: %s (%s driver)" % (label, xdriver),
+               "X11 cannot refresh this panel; use Wayland or the fbdev config (see README)")
+    else:
+        d.ok("desktop: %s%s" % (label, " (%s driver)" % xdriver if xdriver else ""))
 
     say()
     if d.errors:
@@ -290,6 +336,10 @@ def cmd_status():
     say("output  : %s %s" % (output or "-", " ".join(modes)))
     say("touch   : %s" % (touch_device() or "not found"))
     say("calib   : %s" % (calibration_matrix() or "not set"))
+    session, desktop, xdriver = desktop_info()
+    say("desktop : %s" % ("%s%s%s" % (session or "none",
+                                      " / " + desktop if desktop else "",
+                                      " (%s)" % xdriver if xdriver else "")))
     th = throttled()
     if th is not None:
         v = ext5v()
