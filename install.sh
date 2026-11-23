@@ -140,7 +140,13 @@ else
     elif download "$RELEASE_URL/$DEB_ASSET" "/tmp/$DEB_ASSET"; then
         # no binary for this exact kernel: use the DKMS package, which builds
         # the module on this machine
-        dpkg -i "/tmp/$DEB_ASSET" || apt-get -f install -y
+        apt-get install -y "/tmp/$DEB_ASSET" || dpkg -i "/tmp/$DEB_ASSET" || apt-get -f install -y
+        if ! ls /lib/modules/$KVER/updates/dkms/sunfounder-tft35ips.ko* >/dev/null 2>&1; then
+            die "the DKMS build failed for $KVER.
+     The driver does not compile against this kernel yet; see:
+       dkms status
+       tail -40 /var/lib/dkms/sunfounder-tft35ips/1.0.0/build/make.log"
+        fi
         depmod -a >/dev/null 2>&1 || true
         ok "DKMS package installed (module built for $KVER)"
     else
@@ -166,7 +172,8 @@ if ! download "$RELEASE_URL/$OVL_ASSET" "/tmp/$OVL_ASSET"; then
         || die "overlay build failed"
 fi
 install -m 644 "/tmp/$OVL_ASSET" "$OVERLAY_DIR/sunfounder-tft35ips.dtbo"
-ok "overlay installed"
+[ -f "$OVERLAY_DIR/sunfounder-tft35ips.dtbo" ] || die "overlay was not installed into $OVERLAY_DIR"
+ok "overlay installed in $OVERLAY_DIR"
 
 log "4/4 Install tools and enable the overlay"
 install -m 755 "$SRC/tools/sf-tft" /usr/local/bin/sf-tft
