@@ -277,8 +277,7 @@ def cmd_doctor(fix=False):
     session, desktop, xdriver = desktop_info()
     label = session + (" / " + desktop if desktop else "")
     if not session:
-        d.warn("desktop: no graphical session running",
-               "start the desktop (lightdm / gdm) to use the panel")
+        d.ok("desktop: console only (no graphical session)")
     elif session == "X11" and xdriver == "modesetting":
         d.warn("desktop: %s (%s driver)" % (label, xdriver),
                "X11 cannot refresh this panel; use Wayland or the fbdev config (see README)")
