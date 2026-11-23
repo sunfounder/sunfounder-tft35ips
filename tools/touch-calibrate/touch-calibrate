@@ -227,7 +227,6 @@ button.primary { background-color: #ffc53d; color: #1a1200;
                         # during a drag only SYN_REPORT arrives: record the
                         # point so the test canvas follows the finger
                         if self.mode == "test" and down and x is not None and y is not None:
-                            print("DBG syn raw=%s,%s" % (x, y), file=sys.stderr, flush=True)
                             GLib.idle_add(self.add_point, x, y)
                     elif ev.type == ecodes.EV_ABS:
                         if ev.code == ecodes.ABS_X:
@@ -248,7 +247,6 @@ button.primary { background-color: #ffc53d; color: #1a1200;
                         else:
                             pending = True
             except OSError:
-                print("DBG device lost, reopening", file=sys.stderr, flush=True)
                 time.sleep(0.5)
                 dev = find_device()
                 if dev is not None:
@@ -273,8 +271,6 @@ button.primary { background-color: #ffc53d; color: #1a1200;
             self.strokes.append(self.cur)
         else:
             self.cur.append((x, y))
-        print("DBG point=%.1f,%.1f strokes=%d" % (x, y, len(self.strokes)),
-              file=sys.stderr, flush=True)
         self.queue_draw()
 
     def add_point(self, rx, ry):
