@@ -126,6 +126,8 @@ button.primary { background-color: #ffc53d; color: #1a1200;
         self.done = False
         self.mode = "calib"
         self.standalone = False
+        self.flash = {}
+        self.anim = None
         self.strokes = []
         self.cur = None
         self.M = None
@@ -135,6 +137,26 @@ button.primary { background-color: #ffc53d; color: #1a1200;
         self.sub = NAMES[0]
         if hasattr(self, "btnbox"):
             self.btnbox.hide()
+
+    def flash_point(self, idx):
+        self.flash[idx] = time.time()
+        if self.anim is None:
+            self.anim = GLib.timeout_add(40, self.anim_tick)
+        return False
+
+    def anim_tick(self):
+        now = time.time()
+        alive = False
+        for t in list(self.flash.values()):
+            if now - t < 0.45:
+                alive = True
+            else:
+                pass
+        self.queue_draw()
+        if not alive:
+            self.anim = None
+            return False
+        return True
 
     def clear_strokes(self):
         self.strokes = []
@@ -200,6 +222,15 @@ button.primary { background-color: #ffc53d; color: #1a1200;
             cr.stroke()
             cr.move_to(x - 28, y); cr.line_to(x + 28, y); cr.stroke()
             cr.move_to(x, y - 28); cr.line_to(x, y + 28); cr.stroke()
+            flash = self.flash.get(i)
+            if flash is not None:
+                age = time.time() - flash
+                if 0 <= age < 0.45:
+                    k = age / 0.45
+                    cr.set_source_rgba(0.302, 0.851, 0.478, 1.0 - k)
+                    cr.set_line_width(3)
+                    cr.arc(x, y, r + 6 + 18 * k, 0, 6.2832)
+                    cr.stroke()
         # progress: one bar per target
         bw, gap = 26, 8
         x0 = (w - (4 * bw + 3 * gap)) / 2
@@ -328,6 +359,7 @@ button.primary { background-color: #ffc53d; color: #1a1200;
             print("POINT %d avg=%.4f,%.4f target=%d,%d" % (self.idx, su, sv, tx, ty),
                   file=sys.stderr, flush=True)
             self.idx += 1
+            self.flash_point(self.idx - 1)
             self.tap_n = 0
             if self.idx < 4:
                 self.message = "OK - TAP THE NEXT CROSS"
