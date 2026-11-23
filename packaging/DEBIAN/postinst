@@ -35,6 +35,20 @@ configure)
         fi
         depmod -a >/dev/null 2>&1 || true
     fi
+
+    # some distros keep a copy of the module in the initramfs
+    if command -v update-initramfs >/dev/null 2>&1; then
+        update-initramfs -u -k all >/dev/null 2>&1 || true
+    fi
+
+    # X11-only desktops need the fbdev driver (modesetting flips without damage)
+    if [ -d /etc/X11 ] && [ -d /usr/share/xsessions ] && \
+       [ ! -d /usr/share/wayland-sessions ] && \
+       [ -f /usr/share/sunfounder-tft35ips/20-sunfounder-tft-x11.conf ]; then
+        mkdir -p /etc/X11/xorg.conf.d
+        install -m 644 /usr/share/sunfounder-tft35ips/20-sunfounder-tft-x11.conf \
+            /etc/X11/xorg.conf.d/20-sunfounder-tft-x11.conf
+    fi
     ;;
 esac
 
