@@ -44,6 +44,20 @@ ok()  { printf '\033[32m[✓]\033[0m %s\n' "$1"; }
 warn() { printf '\033[33m[!]\033[0m %s\n' "$1"; }
 die() { printf '\033[31m[✗]\033[0m %s\n' "$1" >&2; exit 1; }
 
+download() {
+    # download <url> <dest>; curl, wget or python3, whichever is available
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --retry 2 -o "$2" "$1"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -O "$2" "$1"
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import sys,urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' "$1" "$2"
+    else
+        return 1
+    fi
+}
+
+
 if [ "$EUID" -ne 0 ]; then
     die "Please run as root: curl -sSL ... | sudo bash"
 fi
@@ -62,8 +76,11 @@ done
 
 log "1/4 Install dependencies"
 apt-get update -qq || warn "apt-get update failed, continuing"
-apt-get install -y git device-tree-compiler python3-evdev python3-gi python3-gi-cairo \
+apt-get install -y git curl device-tree-compiler python3-evdev python3-gi python3-gi-cairo \
     >/dev/null || warn "some packages were not installed"
+command -v git >/dev/null 2>&1 || die "git is required but could not be installed (apt-get install -y git)"
+command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || \
+    die "curl or wget is required (apt-get install -y curl)"
 ok "dependencies"
 
 log "2/4 Download files"
@@ -103,13 +120,13 @@ if [ "${TFT35IPS_BUILD_FROM_SOURCE:-}" = "1" ]; then
 else
     MOD_ASSET="sunfounder-tft35ips-${KVER}-${ARCH}.ko.xz"
     DEB_ASSET="sunfounder-tft35ips-dkms_${DKMS_VERSION}_all.deb"
-    if curl -fsSL --retry 2 -o "/tmp/$MOD_ASSET" "$RELEASE_URL/$MOD_ASSET"; then
+    if download "$RELEASE_URL/$MOD_ASSET" "/tmp/$MOD_ASSET"; then
         xz -df "/tmp/$MOD_ASSET"
         mkdir -p "/lib/modules/$KVER/updates"
         install -m 644 "/tmp/${MOD_ASSET%.xz}" "/lib/modules/$KVER/updates/sunfounder-tft35ips.ko"
         depmod -a
         ok "prebuilt module installed for $KVER ($ARCH)"
-    elif curl -fsSL --retry 2 -o "/tmp/$DEB_ASSET" "$RELEASE_URL/$DEB_ASSET"; then
+    elif download "$RELEASE_URL/$DEB_ASSET" "/tmp/$DEB_ASSET"; then
         # no binary for this exact kernel: use the DKMS package, which builds
         # the module on this machine
         dpkg -i "/tmp/$DEB_ASSET" || apt-get -f install -y
@@ -133,7 +150,7 @@ if command -v update-initramfs >/dev/null 2>&1; then
 fi
 
 OVL_ASSET="sunfounder-tft35ips-${KVER}-${ARCH}.dtbo"
-if ! curl -fsSL --retry 2 -o "/tmp/$OVL_ASSET" "$RELEASE_URL/$OVL_ASSET"; then
+if ! download "$RELEASE_URL/$OVL_ASSET" "/tmp/$OVL_ASSET"; then
     dtc -@ -I dts -O dtb -o "/tmp/$OVL_ASSET" "$SRC/driver/sunfounder-tft35ips-overlay.dts" \
         || die "overlay build failed"
 fi
@@ -191,10 +208,15 @@ else
     ok "added dtoverlay=sunfounder-tft35ips to $CONFIG_TXT"
 fi
 
+# the tools are installed under /usr/local, the clone is no longer needed
+rm -rf "$SRC"
+
 echo
 ok "Install finished. Reboot to apply the driver."
+echo "   Touch calibration opens automatically on the first desktop login."
 echo "   Check with:  sf-tft doctor"
 echo "   Calibrate:   sf-tft calibrate"
+echo "   Uninstall:   sudo sf-tft uninstall"
 
 if [ -z "${TFT35IPS_NO_REBOOT_PROMPT:-}" ] && [ -r /dev/tty ]; then
     read -r -p "Reboot now? (y/n) " -n 1 REPLY < /dev/tty || true

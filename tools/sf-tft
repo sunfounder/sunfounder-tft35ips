@@ -5,6 +5,7 @@ Usage:
     sf-tft doctor [--fix]
     sf-tft calibrate
     sf-tft cali-test
+    sf-tft uninstall
     sf-tft status
 
 doctor checks the driver installation, device-tree overlay, DRM output, touch
@@ -345,6 +346,65 @@ def cmd_calibrate():
                           CALIBRATE_BIN])
 
 
+def cmd_uninstall():
+    """Remove the driver, overlay, tools and configuration."""
+    if os.geteuid() != 0:
+        say("run as root: sudo sf-tft uninstall")
+        return 1
+
+    import glob
+    import shutil
+
+    config = config_txt()
+    if config:
+        with open(config, encoding="utf-8") as f:
+            lines = f.readlines()
+        kept = [l for l in lines if not l.strip().startswith("dtoverlay=" + NAME)]
+        if len(kept) != len(lines):
+            with open(config, "w", encoding="utf-8") as f:
+                f.writelines(kept)
+            say("removed dtoverlay=%s from %s" % (NAME, config))
+
+    for d in ("/boot/firmware/overlays", "/boot/overlays"):
+        p = os.path.join(d, NAME + ".dtbo")
+        if os.path.exists(p):
+            os.remove(p)
+            say("removed " + p)
+
+    run(["dkms", "remove", "-m", NAME, "-v", "1.0.0", "--all"])
+    for p in glob.glob("/lib/modules/*/updates/" + NAME + ".ko*") + \
+             glob.glob("/lib/modules/*/updates/dkms/" + NAME + ".ko*"):
+        os.remove(p)
+        say("removed " + p)
+    shutil.rmtree("/usr/src/%s-1.0.0" % NAME, ignore_errors=True)
+    run(["depmod", "-a"])
+
+    for p in ("/usr/local/bin/sf-tft",
+              "/usr/local/bin/touch-calibrate",
+              "/usr/local/bin/sf-tft-x11-mode",
+              "/usr/local/bin/sf-tft-calibrate-once",
+              "/usr/local/sbin/apply-touch-calibration",
+              "/etc/sudoers.d/touch-calibrate",
+              "/usr/share/applications/touch-calibrate.desktop",
+              "/etc/udev/rules.d/99-ads7846-calibration.rules",
+              "/etc/X11/xorg.conf.d/20-sunfounder-tft.conf",
+              "/etc/X11/xorg.conf.d/20-sunfounder-tft-x11.conf"):
+        if os.path.exists(p):
+            os.remove(p)
+            say("removed " + p)
+    for p in glob.glob("/etc/xdg/autostart/sunfounder-tft35ips*.desktop"):
+        os.remove(p)
+        say("removed " + p)
+
+    run(["udevadm", "control", "--reload-rules"])
+    if os.path.exists("/run/systemd/system") and run(["update-initramfs", "-u", "-k", "all"]):
+        pass
+
+    say("")
+    say("Uninstalled. Reboot to remove the display output.")
+    return 0
+
+
 def cmd_status():
     config = config_txt()
     say("overlay : %s" % (overlay_line(config) or "not configured"))
@@ -374,6 +434,7 @@ def main():
     table = {
         "calibrate": cmd_calibrate,
         "cali-test": cmd_cali_test,
+        "uninstall": cmd_uninstall,
         "status": cmd_status,
     }
     if cmd not in table:
