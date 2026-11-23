@@ -159,10 +159,21 @@ install -m 644 "$SRC/tools/sunfounder-tft35ips-x11.desktop" \
 # driver flips without damage and the panel would freeze on the first frame.
 if [ -d /etc/X11 ] && [ -d /usr/share/xsessions ] && \
    [ ! -d /usr/share/wayland-sessions ]; then
+    FB=$(grep -l sunfounder /sys/class/graphics/fb*/name 2>/dev/null | head -1 |
+         sed 's#/sys/class/graphics/\(fb[0-9]*\)/name#/dev/\1#')
+    if [ -z "$FB" ]; then
+        # module may not be loaded yet; the vc4 GPU usually owns fb0
+        if grep -qs vc4 /sys/class/graphics/fb0/name; then FB=/dev/fb1; else FB=/dev/fb0; fi
+    fi
     mkdir -p /etc/X11/xorg.conf.d
-    install -m 644 "$SRC/tools/20-sunfounder-tft-x11.conf" \
-        /etc/X11/xorg.conf.d/20-sunfounder-tft-x11.conf
-    ok "X11 fallback installed (fbdev, single display)"
+    cat > /etc/X11/xorg.conf.d/20-sunfounder-tft-x11.conf <<EOF
+Section "Device"
+    Identifier "SunFounder TFT panel"
+    Driver     "fbdev"
+    Option     "fbdev" "$FB"
+EndSection
+EOF
+    ok "X11 fallback installed (fbdev $FB, single display)"
 fi
 ok "sf-tft and touch-calibrate installed"
 

@@ -43,11 +43,15 @@ configure)
 
     # X11-only desktops need the fbdev driver (modesetting flips without damage)
     if [ -d /etc/X11 ] && [ -d /usr/share/xsessions ] && \
-       [ ! -d /usr/share/wayland-sessions ] && \
-       [ -f /usr/share/sunfounder-tft35ips/20-sunfounder-tft-x11.conf ]; then
+       [ ! -d /usr/share/wayland-sessions ]; then
+        FB=$(grep -l sunfounder /sys/class/graphics/fb*/name 2>/dev/null | head -1 |
+             sed 's#/sys/class/graphics/\(fb[0-9]*\)/name#/dev/\1#')
+        if [ -z "$FB" ]; then
+            if grep -qs vc4 /sys/class/graphics/fb0/name; then FB=/dev/fb1; else FB=/dev/fb0; fi
+        fi
         mkdir -p /etc/X11/xorg.conf.d
-        install -m 644 /usr/share/sunfounder-tft35ips/20-sunfounder-tft-x11.conf \
-            /etc/X11/xorg.conf.d/20-sunfounder-tft-x11.conf
+        printf 'Section "Device"\n    Identifier "SunFounder TFT panel"\n    Driver     "fbdev"\n    Option     "fbdev" "%s"\nEndSection\n' \
+            "$FB" > /etc/X11/xorg.conf.d/20-sunfounder-tft-x11.conf
     fi
     ;;
 esac
