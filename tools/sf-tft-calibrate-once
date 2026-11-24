@@ -7,7 +7,26 @@ RULES=/etc/udev/rules.d/99-ads7846-calibration.rules
 
 [ -f "$RULES" ] && exit 0
 
+# The greeter (gdm's own session) also runs /etc/xdg/autostart entries, but
+# there is no visible desktop yet: the window cannot be seen while taps on the
+# panel are still recorded, which produces a calibration nobody watched.
+[ "${XDG_SESSION_CLASS:-}" = "user" ] || exit 0
+
 # only when the panel driver is actually there
-[ -e /sys/class/drm/card*-SPI-1 ] || exit 0
+ls /sys/class/drm/card*-SPI-1 >/dev/null 2>&1 || exit 0
+
+# let the compositor finish bringing the output up
+sleep 2
+
+# GNOME/Wayland: let the window position itself on the panel via XWayland
+for a in "$XDG_RUNTIME_DIR"/.mutter-Xwaylandauth.*; do
+    if [ -f "$a" ]; then
+        GDK_BACKEND=x11
+        DISPLAY=:0
+        XAUTHORITY="$a"
+        export GDK_BACKEND DISPLAY XAUTHORITY
+        break
+    fi
+done
 
 exec /usr/local/bin/touch-calibrate

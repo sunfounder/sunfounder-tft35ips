@@ -189,6 +189,8 @@ install -m 644 "$SRC/tools/touch-calibrate/touch-calibrate.desktop" \
     /usr/share/applications/touch-calibrate.desktop
 install -m 755 "$SRC/tools/sf-tft-x11-mode" /usr/local/bin/sf-tft-x11-mode
 install -m 755 "$SRC/tools/sf-tft-calibrate-once" /usr/local/bin/sf-tft-calibrate-once
+install -d /usr/share/bash-completion/completions
+install -m 644 "$SRC/tools/sf-tft.bash" /usr/share/bash-completion/completions/sf-tft
 mkdir -p /etc/xdg/autostart
 install -m 644 "$SRC/tools/sunfounder-tft35ips-x11.desktop" \
     /etc/xdg/autostart/sunfounder-tft35ips-x11.desktop

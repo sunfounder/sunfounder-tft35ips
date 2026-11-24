@@ -100,6 +100,19 @@ def wayland_env():
     return None, None, None
 
 
+def xwayland_env(runtime):
+    """Extra env so the calibration window can place itself on the panel.
+
+    Wayland gives clients no control over where a window appears, but an X11
+    client under XWayland may position itself. mutter publishes the
+    XWayland authorisation file in the session runtime directory.
+    """
+    auth = sorted(glob.glob(runtime + "/.mutter-Xwaylandauth.*"))
+    if not auth:
+        return []
+    return ["GDK_BACKEND=x11", "DISPLAY=:0", "XAUTHORITY=" + auth[0]]
+
+
 def touch_device():
     for path in sorted(glob.glob("/sys/class/input/event*/device/name")):
         try:
@@ -328,8 +341,9 @@ def cmd_cali_test():
         return 1
     os.execvp("runuser", ["runuser", "-u", user, "--", "env",
                           "XDG_RUNTIME_DIR=" + runtime,
-                          "WAYLAND_DISPLAY=" + display,
-                          CALIBRATE_BIN, "--test"])
+                          "WAYLAND_DISPLAY=" + display]
+              + xwayland_env(runtime)
+              + [CALIBRATE_BIN, "--test"])
 
 
 def cmd_calibrate():
@@ -342,8 +356,9 @@ def cmd_calibrate():
         return 1
     os.execvp("runuser", ["runuser", "-u", user, "--", "env",
                           "XDG_RUNTIME_DIR=" + runtime,
-                          "WAYLAND_DISPLAY=" + display,
-                          CALIBRATE_BIN])
+                          "WAYLAND_DISPLAY=" + display]
+              + xwayland_env(runtime)
+              + [CALIBRATE_BIN])
 
 
 def cmd_uninstall():
