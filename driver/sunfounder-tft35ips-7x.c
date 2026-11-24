@@ -61,12 +61,6 @@ struct sunfounder_tft35ips_device {
 static bool g_bgr_enabled;
 static bool g_color_invert_enabled;
 
-static struct sunfounder_tft35ips_device *
-to_sunfounder_tft35ips(struct drm_device *drm)
-{
-	return container_of(drm_to_mipi_dbi_dev(drm),
-			    struct sunfounder_tft35ips_device, dbidev);
-}
 
 /*
  * The module has a SPI to 16-bit parallel bus converter in front of the
