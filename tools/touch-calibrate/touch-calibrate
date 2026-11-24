@@ -582,7 +582,7 @@ def load_matrix():
     try:
         with open(RULES_FILE, encoding="utf-8") as f:
             text = f.read()
-        m = re.search(r'LIBINPUT_CALIBRATION_MATRIX="([^"]+)"', text)
+        m = re.search(r'LIBINPUT_CALIBRATION_MATRIX\}?="([^"]+)"', text)
         if m:
             v = [float(x) for x in m.group(1).split()]
             if len(v) >= 6:
