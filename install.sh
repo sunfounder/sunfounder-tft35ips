@@ -183,6 +183,8 @@ printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/apply-touch-calibration\n' "$USE
     > /etc/sudoers.d/touch-calibrate
 chmod 440 /etc/sudoers.d/touch-calibrate
 visudo -cf /etc/sudoers.d/touch-calibrate >/dev/null
+# the calibration app reads /dev/input/event*, which belongs to the input group
+usermod -aG input "$USER_NAME" >/dev/null 2>&1 || true
 install -m 644 "$SRC/tools/touch-calibrate/touch-calibrate.desktop" \
     /usr/share/applications/touch-calibrate.desktop
 install -m 755 "$SRC/tools/sf-tft-x11-mode" /usr/local/bin/sf-tft-x11-mode
