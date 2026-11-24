@@ -6,6 +6,7 @@ Usage:
     sf-tft calibrate
     sf-tft cali-test
     sf-tft uninstall
+    sf-tft touch-map [--clear]
     sf-tft status
 
 doctor checks the driver installation, device-tree overlay, DRM output, touch
@@ -346,6 +347,71 @@ def cmd_cali_test():
               + [CALIBRATE_BIN, "--test"])
 
 
+TOUCHSCREEN_SCHEMA = "org.gnome.desktop.peripherals.touchscreen"
+TOUCHSCREEN_PATH = "/org/gnome/desktop/peripherals/touchscreens/"
+# what the driver's EDID reports for this panel
+PANEL_EDID = ("SFN", "SunFounder", "0x00000001")
+
+
+def touch_device_ids():
+    """(vendor:product) of the touch controller, as GNOME keys its settings."""
+    for path in sorted(glob.glob("/sys/class/input/event*/device/uevent")):
+        try:
+            with open(path) as f:
+                text = f.read()
+        except OSError:
+            continue
+        if TOUCH_NAME not in text:
+            continue
+        for line in text.splitlines():
+            if line.startswith("PRODUCT="):
+                parts = line.split("=", 1)[1].split("/")
+                if len(parts) >= 3:
+                    return "%04x:%04x" % (int(parts[1], 16), int(parts[2], 16))
+    return None
+
+
+def touch_map_value(dev_id):
+    return "%s%s/output" % (TOUCHSCREEN_PATH, dev_id)
+
+
+def gsettings_get(user, runtime, key):
+    r = run(["runuser", "-u", user, "--", "env",
+             "XDG_RUNTIME_DIR=" + runtime,
+             "DBUS_SESSION_BUS_ADDRESS=unix:path=%s/bus" % runtime,
+             "gsettings", "get", TOUCHSCREEN_SCHEMA + ":" + TOUCHSCREEN_PATH + key.split(TOUCHSCREEN_PATH)[1]])
+    return r.stdout.strip() if r and r.returncode == 0 else None
+
+
+def gsettings_set(user, runtime, dev_id, value):
+    path = "%s:%s%s/" % (TOUCHSCREEN_SCHEMA, TOUCHSCREEN_PATH, dev_id)
+    r = run(["runuser", "-u", user, "--", "env",
+             "XDG_RUNTIME_DIR=" + runtime,
+             "DBUS_SESSION_BUS_ADDRESS=unix:path=%s/bus" % runtime,
+             "gsettings", "set", path, "output", value])
+    return bool(r and r.returncode == 0)
+
+
+def cmd_touch_map(args=None):
+    """Map the touchscreen to this panel (GNOME/Wayland needs it explicitly)."""
+    user, runtime, _ = wayland_env()
+    if not user:
+        say("no Wayland session found")
+        return 1
+    dev = touch_device_ids()
+    if not dev:
+        say("touch device not found")
+        return 1
+    if args and args[0] in ("--clear", "clear"):
+        ok = gsettings_set(user, runtime, dev, "['', '', '']")
+        say("touch mapping cleared" if ok else "failed to clear")
+        return 0 if ok else 1
+    value = str(list(PANEL_EDID)).replace('"', "'")
+    ok = gsettings_set(user, runtime, dev, value)
+    say("%s %s -> %s" % ("mapped" if ok else "failed", dev, value))
+    return 0 if ok else 1
+
+
 def cmd_calibrate():
     if not os.path.isfile(CALIBRATE_BIN):
         say("touch-calibrate not installed; run the installer first")
@@ -450,6 +516,7 @@ def main():
         "calibrate": cmd_calibrate,
         "cali-test": cmd_cali_test,
         "uninstall": cmd_uninstall,
+        "touch-map": cmd_touch_map,
         "status": cmd_status,
     }
     if cmd not in table:
