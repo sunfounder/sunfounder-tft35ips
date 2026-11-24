@@ -5,12 +5,11 @@ PWD := $(shell pwd)
 MODULE_NAME := sunfounder-tft35ips
 EXTRA_CFLAGS += -I$(PWD)/include
 # kernel 7.x removed the mipi-dbi simple-pipe helpers, so that path uses its
-# own implementation; both build to the same module name
+# own implementation; both build to the same module name. On 6.x the module is
+# built straight from sunfounder-tft35ips.c, so no -y list is set there.
 KMAJOR := $(if $(VERSION),$(VERSION),0)
 ifeq ($(shell [ $(KMAJOR) -ge 7 ] && echo 1),1)
 $(MODULE_NAME)-y := $(MODULE_NAME)-7x.o
-else
-$(MODULE_NAME)-y := $(MODULE_NAME).o
 endif
 obj-m += $(MODULE_NAME).o
 
