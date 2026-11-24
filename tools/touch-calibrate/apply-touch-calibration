@@ -25,7 +25,8 @@ cat > "$RULE" <<EOF
 SUBSYSTEM=="input", ENV{ID_INPUT_TOUCHSCREEN}=="1", ATTRS{name}=="ADS7846 Touchscreen", ENV{LIBINPUT_CALIBRATION_MATRIX}="$MATRIX"
 EOF
 udevadm control --reload-rules
-udevadm trigger --subsystem-match=input
+# the rebind below makes the device reappear, which runs the rule again; a
+# separate full input trigger only adds seconds on a slow machine
 
 # Let the running compositor pick the new matrix up without a reboot: rebinding
 # the SPI device makes the input device reappear, and libinput reads the udev
@@ -34,7 +35,7 @@ for d in /sys/bus/spi/drivers/ads7846/spi*; do
     [ -e "$d" ] || continue
     dev=$(basename "$d")
     echo "$dev" > /sys/bus/spi/drivers/ads7846/unbind 2>/dev/null || continue
-    sleep 0.3
+    sleep 0.15
     echo "$dev" > /sys/bus/spi/drivers/ads7846/bind 2>/dev/null || true
 done
 

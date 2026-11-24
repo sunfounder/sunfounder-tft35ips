@@ -5,7 +5,7 @@ One tap per target (4 taps total). The same-spot guard rejects a second tap on
 the previous cross, so a stray double-tap cannot shift the next point.
 After saving: DONE (the matrix is applied without a reboot).
 """
-import sys, subprocess, threading, time
+import os, sys, subprocess, threading, time
 import colorsys
 import re
 import gi
@@ -20,6 +20,7 @@ DEVICE_NAME = "ADS7846 Touchscreen"
 HELPER = ["sudo", "-n", "/usr/local/sbin/apply-touch-calibration"]
 RULES_FILE = "/etc/udev/rules.d/99-ads7846-calibration.rules"
 MARGIN = 0.12
+FADE = 3.0          # seconds a test stroke stays visible
 TAPS = 1
 NAMES = ["TOP-LEFT", "TOP-RIGHT", "BOTTOM-LEFT", "BOTTOM-RIGHT"]
 DEBOUNCE = 0.25
@@ -49,7 +50,7 @@ class Calibrator(Gtk.Window):
         self.ax = dev.absinfo(ecodes.ABS_X)
         self.ay = dev.absinfo(ecodes.ABS_Y)
         self.set_decorated(False)
-        self.fullscreen()
+        self.set_default_size(480, 320)
 
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.area = Gtk.DrawingArea()
@@ -66,12 +67,12 @@ class Calibrator(Gtk.Window):
         self.btn_clear = Gtk.Button(label="Clear")
         self.btn_recal = Gtk.Button(label="Recalibrate")
         self.btn_done = Gtk.Button(label="Done")
-        self.btn_retry.connect("clicked", lambda b: self.retry())
-        self.btn_exit.connect("clicked", lambda b: Gtk.main_quit())
-        self.btn_clear.connect("clicked", lambda b: self.clear_strokes())
-        self.btn_recal.connect("clicked", lambda b: self.retry())
+        self.btn_retry.connect("clicked", lambda b: self.do_action(self.retry))
+        self.btn_exit.connect("clicked", lambda b: self.do_action(Gtk.main_quit))
+        self.btn_clear.connect("clicked", lambda b: self.do_action(self.clear_strokes))
+        self.btn_recal.connect("clicked", lambda b: self.do_action(self.retry))
         self.btn_done.get_style_context().add_class("primary")
-        self.btn_done.connect("clicked", lambda b: Gtk.main_quit())
+        self.btn_done.connect("clicked", lambda b: self.do_action(Gtk.main_quit))
         for b in (self.btn_retry, self.btn_exit, self.btn_clear, self.btn_recal, self.btn_done):
             self.btnbox.pack_start(b, True, True, 0)
         # the buttons float over the drawing area: the touch keeps working
@@ -97,11 +98,45 @@ button.primary { background-color: #ffc53d; color: #1a1200;
             Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
         self.reset()
+        self.ignore_until = 0.0
         self.connect("key-press-event", self.on_key)
         self.show_all()
+        # request fullscreen once the surface exists: a request made before
+        # realisation is ignored by some compositors, and a settings window
+        # sliding over the window then hides both targets and buttons
+        # Wayland gives the client no say over which monitor it lands on and
+        # fullscreen() follows whatever the compositor picks, so keep a plain
+        # 480x320 window (the panel's size) that stays on top and can be
+        # dragged onto the 3.5" screen once.
+        self.set_keep_above(True)
+        self.set_default_size(480, 320)
+        self.set_resizable(False)
+        self.present()
+        # under XWayland an X11 client may place itself: move onto the 3.5"
+        # panel, which Wayland clients are not allowed to do
+        if os.environ.get("GDK_BACKEND") == "x11":
+            try:
+                display = Gdk.Display.get_default()
+                for i in range(display.get_n_monitors()):
+                    geo = display.get_monitor(i).get_geometry()
+                    if geo.width <= 640 and geo.height <= 480:
+                        self.move(geo.x, geo.y)
+                        break
+            except Exception:
+                pass
         self.btnbox.hide()
-        threading.Thread(target=self.read_loop, daemon=True).start()
+        # do not record anything before the window is actually on screen:
+        # starting from the greeter (or before the compositor maps it) records
+        # taps the user cannot see
+        self._reading = False
+        self.connect("map-event", self.on_mapped)
         GLib.timeout_add(1000, self.heartbeat)
+
+    def on_mapped(self, *args):
+        if not self._reading:
+            self._reading = True
+            threading.Thread(target=self.read_loop, daemon=True).start()
+        return False
 
     def start_test(self):
         m = load_matrix()
@@ -127,6 +162,11 @@ button.primary { background-color: #ffc53d; color: #1a1200;
         self.mode = "calib"
         self.standalone = False
         self.saving = False
+        self.last_btn_ts = 0.0
+        self.last_draw_ts = 0.0
+        self.hue_seq = 0
+        self.test_tick = None
+        self.suppress_stroke = False
         self.flash = {}
         self.anim = None
         self.strokes = []
@@ -248,21 +288,43 @@ button.primary { background-color: #ffc53d; color: #1a1200;
         self.text(cr, self.sub, 12, h - 26, self.MUTED, w=w)
         return False
 
+    def test_tick_cb(self):
+        if not self.strokes:
+            self.test_tick = None
+            return False
+        self.queue_draw()
+        return True
+
     def draw_test(self, w, h, cr):
         cr.set_line_width(4)
         cr.set_line_cap(1)  # round
         cr.set_line_join(1)
+        now = time.time()
         n = 0
-        for s in self.strokes:
+        for s in list(self.strokes):
+            keep = []
+            for p in s:
+                if now - p[2] < FADE:
+                    keep.append(p)
+            if not keep:
+                try:
+                    self.strokes.remove(s)
+                except ValueError:
+                    pass
+                continue
+            s[:] = keep
             for i in range(1, len(s)):
-                hue = (n * 0.012) % 1.0
-                r, g, b = colorsys.hsv_to_rgb(hue, 0.85, 1.0)
-                cr.set_source_rgb(r, g, b)
+                age = now - s[i][2]
+                alpha = max(0.0, 1.0 - age / FADE)
+                r, g, b = colorsys.hsv_to_rgb(s[i][3], 0.85, 1.0)
+                cr.set_source_rgba(r, g, b, alpha)
                 cr.move_to(s[i - 1][0], s[i - 1][1])
                 cr.line_to(s[i][0], s[i][1])
                 cr.stroke()
                 n += 1
-        title = "CALIBRATION TEST" if getattr(self, "standalone", False) else "CALIBRATION DONE"
+        if self.strokes and self.test_tick is None:
+            self.test_tick = GLib.timeout_add(120, self.test_tick_cb)
+        title = "CALIBRATION TEST"
         self.text(cr, title, 17, 12, (1, 1, 1), bold=True, w=w)
         self.text(cr, "DRAW TO TEST THE TOUCH", 11, 36, self.MUTED, w=w)
         return False
@@ -286,6 +348,7 @@ button.primary { background-color: #ffc53d; color: #1a1200;
                             y = ev.value
                         if pending and x is not None and y is not None:
                             pending = False
+                            GLib.idle_add(self.on_press, x, y)
                             GLib.idle_add(self.add_point, x, y)
                     elif ev.type == ecodes.EV_KEY and ev.code == ecodes.BTN_TOUCH:
                         down = ev.value == 1
@@ -294,6 +357,7 @@ button.primary { background-color: #ffc53d; color: #1a1200;
                             x = y = None
                             GLib.idle_add(self.end_stroke)
                         elif x is not None and y is not None:
+                            GLib.idle_add(self.on_press, x, y)
                             GLib.idle_add(self.add_point, x, y)
                         else:
                             pending = True
@@ -307,6 +371,66 @@ button.primary { background-color: #ffc53d; color: #1a1200;
         self.cur = None
         return False
 
+    def do_action(self, fn):
+        """Run a button action, ignoring the duplicate the compositor may send."""
+        now = time.time()
+        if now - self.last_btn_ts < 0.4:
+            return
+        self.last_btn_ts = now
+        fn()
+        self.ignore_until = time.time() + 0.6
+
+    def button_hit(self, x, y):
+        if not getattr(self, "_rects_logged", False):
+            self._rects_logged = True
+            for b in (self.btn_clear, self.btn_recal, self.btn_done,
+                      self.btn_exit, self.btn_retry):
+                bx, by = b.translate_coordinates(self.area, 0, 0)
+                print("RECT %s %s,%s %dx%d vis=%s sens=%s" % (
+                    b.get_label(), bx, by, b.get_allocated_width(),
+                    b.get_allocated_height(), b.get_visible(), b.get_sensitive()),
+                    file=sys.stderr, flush=True)
+        for btn in (self.btn_clear, self.btn_recal, self.btn_done,
+                    self.btn_exit, self.btn_retry):
+            if not btn.get_visible() or not btn.get_sensitive():
+                continue
+            bx, by = btn.translate_coordinates(self.area, 0, 0)
+            if bx <= x <= bx + btn.get_allocated_width() and \
+               by <= y <= by + btn.get_allocated_height():
+                return btn
+        return None
+
+    def on_press(self, rx, ry):
+        """Pen down: if it lands on a visible button, activate it."""
+        if not self.btnbox.get_visible():
+            return False
+        u = (rx - self.ax.min) / max(1, self.ax.max - self.ax.min)
+        v = (ry - self.ay.min) / max(1, self.ay.max - self.ay.min)
+        w = self.area.get_allocated_width()
+        h = self.area.get_allocated_height()
+        if self.M is not None:
+            a, b, c, d, e, f = self.M
+            sx = (a * u + b * v + c) * w
+            sy = (d * u + e * v + f) * h
+        else:
+            sx, sy = u * w, v * h
+        btn = self.button_hit(sx, sy)
+        print("PRESS %.0f,%.0f hit=%s" % (sx, sy, btn.get_label() if btn else "-"),
+              file=sys.stderr, flush=True)
+        if btn is None:
+            self.suppress_stroke = False
+            return False
+        actions = {self.btn_clear: self.clear_strokes,
+                   self.btn_recal: self.retry,
+                   self.btn_done: Gtk.main_quit,
+                   self.btn_exit: Gtk.main_quit,
+                   self.btn_retry: self.retry}
+        self.suppress_stroke = self.mode == "test"
+        # the same touch must not fall through into the calibration targets
+        self.do_action(actions[btn])
+        self.ignore_until = time.time() + 0.6
+        return True
+
     def add_test_point(self, rx, ry):
         if not self.M:
             return
@@ -317,15 +441,23 @@ button.primary { background-color: #ffc53d; color: #1a1200;
         h = self.area.get_allocated_height()
         x = (a * u + b * v + c) * w
         y = (d * u + e * v + f) * h
+        now = time.time()
+        self.hue_seq += 1
+        hue = (self.hue_seq * 0.012) % 1.0
         if self.cur is None:
-            self.cur = [(x, y)]
+            self.cur = [(x, y, now, hue)]
             self.strokes.append(self.cur)
         else:
-            self.cur.append((x, y))
-        self.queue_draw()
+            self.cur.append((x, y, now, hue))
+        # keep the canvas bounded: the trail fades out anyway
+        if len(self.strokes) > 40:
+            del self.strokes[:-20]
+        if now - self.last_draw_ts > 0.07:
+            self.last_draw_ts = now
+            self.queue_draw()
 
     def add_point(self, rx, ry):
-        if self.saving:
+        if self.saving or time.time() < self.ignore_until:
             return False
         if self.mode == "test":
             self.add_test_point(rx, ry)
@@ -423,8 +555,9 @@ button.primary { background-color: #ffc53d; color: #1a1200;
         self.btnbox.show_all()
         for b in (self.btn_retry, self.btn_exit):
             b.set_visible(not ok)
-        for b in (self.btn_clear, self.btn_recal, self.btn_done):
+        for b in (self.btn_recal, self.btn_done):
             b.set_visible(ok)
+        self.btn_clear.hide()
 
     def fail(self, msg):
         print("FAIL " + msg, file=sys.stderr, flush=True)

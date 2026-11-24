@@ -87,11 +87,11 @@ fi
 
 log "1/4 Install dependencies"
 apt-get update -qq || warn "apt-get update failed, continuing"
-apt-get install -y git curl device-tree-compiler python3-evdev python3-gi python3-gi-cairo \
+apt-get install -y git device-tree-compiler python3-evdev python3-gi python3-gi-cairo \
     >/dev/null || warn "some packages were not installed"
 command -v git >/dev/null 2>&1 || die "git is required but could not be installed (apt-get install -y git)"
 command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || \
-    die "curl or wget is required (apt-get install -y curl)"
+    command -v python3 >/dev/null 2>&1 || die "curl, wget or python3 is required to download files"
 ok "dependencies"
 
 log "2/4 Download files"
@@ -140,7 +140,13 @@ else
     elif download "$RELEASE_URL/$DEB_ASSET" "/tmp/$DEB_ASSET"; then
         # no binary for this exact kernel: use the DKMS package, which builds
         # the module on this machine
-        dpkg -i "/tmp/$DEB_ASSET" || apt-get -f install -y
+        apt-get install -y "/tmp/$DEB_ASSET" || dpkg -i "/tmp/$DEB_ASSET" || apt-get -f install -y
+        if ! ls /lib/modules/$KVER/updates/dkms/sunfounder-tft35ips.ko* >/dev/null 2>&1; then
+            die "the DKMS build failed for $KVER.
+     The driver does not compile against this kernel yet; see:
+       dkms status
+       tail -40 /var/lib/dkms/sunfounder-tft35ips/1.0.0/build/make.log"
+        fi
         depmod -a >/dev/null 2>&1 || true
         ok "DKMS package installed (module built for $KVER)"
     else
@@ -166,7 +172,8 @@ if ! download "$RELEASE_URL/$OVL_ASSET" "/tmp/$OVL_ASSET"; then
         || die "overlay build failed"
 fi
 install -m 644 "/tmp/$OVL_ASSET" "$OVERLAY_DIR/sunfounder-tft35ips.dtbo"
-ok "overlay installed"
+[ -f "$OVERLAY_DIR/sunfounder-tft35ips.dtbo" ] || die "overlay was not installed into $OVERLAY_DIR"
+ok "overlay installed in $OVERLAY_DIR"
 
 log "4/4 Install tools and enable the overlay"
 install -m 755 "$SRC/tools/sf-tft" /usr/local/bin/sf-tft
@@ -176,10 +183,14 @@ printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/apply-touch-calibration\n' "$USE
     > /etc/sudoers.d/touch-calibrate
 chmod 440 /etc/sudoers.d/touch-calibrate
 visudo -cf /etc/sudoers.d/touch-calibrate >/dev/null
+# the calibration app reads /dev/input/event*, which belongs to the input group
+usermod -aG input "$USER_NAME" >/dev/null 2>&1 || true
 install -m 644 "$SRC/tools/touch-calibrate/touch-calibrate.desktop" \
     /usr/share/applications/touch-calibrate.desktop
 install -m 755 "$SRC/tools/sf-tft-x11-mode" /usr/local/bin/sf-tft-x11-mode
 install -m 755 "$SRC/tools/sf-tft-calibrate-once" /usr/local/bin/sf-tft-calibrate-once
+install -d /usr/share/bash-completion/completions
+install -m 644 "$SRC/tools/sf-tft.bash" /usr/share/bash-completion/completions/sf-tft
 mkdir -p /etc/xdg/autostart
 install -m 644 "$SRC/tools/sunfounder-tft35ips-x11.desktop" \
     /etc/xdg/autostart/sunfounder-tft35ips-x11.desktop
