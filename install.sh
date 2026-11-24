@@ -87,11 +87,11 @@ fi
 
 log "1/4 Install dependencies"
 apt-get update -qq || warn "apt-get update failed, continuing"
-apt-get install -y git curl device-tree-compiler python3-evdev python3-gi python3-gi-cairo \
+apt-get install -y git device-tree-compiler python3-evdev python3-gi python3-gi-cairo \
     >/dev/null || warn "some packages were not installed"
 command -v git >/dev/null 2>&1 || die "git is required but could not be installed (apt-get install -y git)"
 command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || \
-    die "curl or wget is required (apt-get install -y curl)"
+    command -v python3 >/dev/null 2>&1 || die "curl, wget or python3 is required to download files"
 ok "dependencies"
 
 log "2/4 Download files"
