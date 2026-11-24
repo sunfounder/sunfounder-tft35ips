@@ -272,8 +272,19 @@ static const struct drm_mode_config_funcs sf_tft_mode_config_funcs = {
 	DRM_MIPI_DBI_MODE_CONFIG_FUNCS,
 };
 
+/* 30 Hz: 480 x 320 x 30 / 1000 = 4608 kHz, which is what 125 MHz SPI can feed */
 static const struct drm_display_mode waveshare_mode = {
-	DRM_SIMPLE_MODE(480, 320, 73, 49),
+	.clock = 480 * 320 * 30 / 1000,
+	.hdisplay = 480,
+	.hsync_start = 480,
+	.hsync_end = 480,
+	.htotal = 480,
+	.vdisplay = 320,
+	.vsync_start = 320,
+	.vsync_end = 320,
+	.vtotal = 320,
+	.width_mm = 73,
+	.height_mm = 49,
 };
 
 DEFINE_DRM_GEM_DMA_FOPS(sunfounder_tft35ips_fops);
